@@ -1,8 +1,10 @@
-export default class TxContext {
-  gasPrice: Buffer
-  origin: Buffer
+import { Address, BN } from 'ethereumjs-util'
 
-  constructor(gasPrice: Buffer, origin: Buffer) {
+export default class TxContext {
+  gasPrice: BN
+  origin: Address
+
+  constructor(gasPrice: BN, origin: Address) {
     this.gasPrice = gasPrice
     this.origin = origin
   }

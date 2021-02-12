@@ -1,64 +1,59 @@
+import { Account, BN, toBuffer, pubToAddress, bufferToHex } from 'ethereumjs-util'
+import { Transaction, TxData } from '@ethereumjs/tx'
 import VM from '../..'
-import Account from 'ethereumjs-account'
-import * as utils from 'ethereumjs-util'
-import PStateManager from '../../lib/state/promisified'
-import { Transaction } from 'ethereumjs-tx'
 
 async function main() {
   const vm = new VM()
-  const psm = new PStateManager(vm.stateManager)
 
-  // import the key pair
-  //   used to sign transactions and generate addresses
+  // Import the key pair,
+  // used to sign transactions and generate addresses
   const keyPair = require('./key-pair')
-  const privateKey = utils.toBuffer(keyPair.secretKey)
+  const privateKey = toBuffer(keyPair.secretKey)
 
-  const publicKeyBuf = utils.toBuffer(keyPair.publicKey)
-  const address = utils.pubToAddress(publicKeyBuf, true)
+  const publicKeyBuf = toBuffer(keyPair.publicKey)
+  const address = pubToAddress(publicKeyBuf, true)
 
   console.log('---------------------')
-  console.log('Sender address: ', utils.bufferToHex(address))
+  console.log('Sender address: ', bufferToHex(address))
 
-  // create a new account
-  const account = new Account({
-    balance: 100e18,
-  })
+  // Create a new account
+  const acctData = {
+    nonce: 0,
+    balance: new BN(10).pow(new BN(19)), // 10 eth
+  }
+  const account = Account.fromAccountData(acctData)
 
   // Save the account
-  await psm.putAccount(address, account)
+  await vm.stateManager.putAccount(address, account)
 
-  const rawTx1 = require('./raw-tx1')
-  const rawTx2 = require('./raw-tx2')
+  const txData1 = require('./raw-tx1')
+  const txData2 = require('./raw-tx2')
 
   // The first transaction deploys a contract
-  const createdAddress = (await runTx(vm, rawTx1, privateKey))!
+  const createdAddress = (await runTx(vm, txData1, privateKey))!
 
   // The second transaction calls that contract
-  await runTx(vm, rawTx2, privateKey)
+  await runTx(vm, txData2, privateKey)
 
-  // Now lets look at what we created. The transaction
+  // Now let's look at what we created. The transaction
   // should have created a new account for the contract
-  // in the state. Lets test to see if it did.
+  // in the state. Let's test to see if it did.
 
-  const createdAccount = await psm.getAccount(createdAddress)
+  const createdAccount = await vm.stateManager.getAccount(createdAddress)
 
   console.log('-------results-------')
-  console.log('nonce: ' + createdAccount.nonce.toString('hex'))
-  console.log('balance in wei: ', createdAccount.balance.toString('hex') || 0)
-  console.log('stateRoot: ' + createdAccount.stateRoot.toString('hex'))
-  console.log('codeHash: ' + createdAccount.codeHash.toString('hex'))
+  console.log('nonce: ' + createdAccount.nonce.toString())
+  console.log('balance in wei: ', createdAccount.balance.toString())
+  console.log('stateRoot: 0x' + createdAccount.stateRoot.toString('hex'))
+  console.log('codeHash: 0x' + createdAccount.codeHash.toString('hex'))
   console.log('---------------------')
 }
 
-async function runTx(vm: VM, rawTx: any, privateKey: Buffer) {
-  const tx = new Transaction(rawTx)
-
-  tx.sign(privateKey)
+async function runTx(vm: VM, txData: TxData, privateKey: Buffer) {
+  const tx = Transaction.fromTxData(txData).sign(privateKey)
 
   console.log('----running tx-------')
-  const results = await vm.runTx({
-    tx: tx,
-  })
+  const results = await vm.runTx({ tx })
 
   console.log('gas used: ' + results.gasUsed.toString())
   console.log('returned: ' + results.execResult.returnValue.toString('hex'))
@@ -66,14 +61,14 @@ async function runTx(vm: VM, rawTx: any, privateKey: Buffer) {
   const createdAddress = results.createdAddress
 
   if (createdAddress) {
-    console.log('address created: ' + createdAddress.toString('hex'))
+    console.log('address created: 0x' + createdAddress.toString('hex'))
     return createdAddress
   }
 }
 
 main()
   .then(() => process.exit(0))
-  .catch(error => {
+  .catch((error) => {
     console.error(error)
     process.exit(1)
   })

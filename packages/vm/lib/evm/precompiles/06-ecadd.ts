@@ -4,10 +4,10 @@ import { OOGResult, ExecResult } from '../evm'
 const assert = require('assert')
 const bn128 = require('rustbn.js')
 
-export default function(opts: PrecompileInput): ExecResult {
+export default function (opts: PrecompileInput): ExecResult {
   assert(opts.data)
 
-  let inputData = opts.data
+  const inputData = opts.data
 
   const gasUsed = new BN(opts._common.param('gasPrices', 'ecAdd'))
   if (opts.gasLimit.lt(gasUsed)) {

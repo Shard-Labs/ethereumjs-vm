@@ -4,7 +4,7 @@ import { PrecompileInput } from './types'
 import { OOGResult, ExecResult } from '../evm'
 const assert = require('assert')
 
-export default function(opts: PrecompileInput): ExecResult {
+export default function (opts: PrecompileInput): ExecResult {
   assert(opts.data)
 
   const gasUsed = new BN(opts._common.param('gasPrices', 'ecRecover'))
@@ -15,7 +15,7 @@ export default function(opts: PrecompileInput): ExecResult {
 
   const data = setLengthRight(opts.data, 128)
 
-  var msgHash = data.slice(0, 32)
+  const msgHash = data.slice(0, 32)
   const v = data.slice(32, 64)
   const r = data.slice(64, 96)
   const s = data.slice(96, 128)

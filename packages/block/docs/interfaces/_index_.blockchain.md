@@ -1,38 +1,29 @@
-[ethereumjs-block](../README.md) › ["index"](../modules/_index_.md) › [Blockchain](_index_.blockchain.md)
+[@ethereumjs/block](../README.md) › ["index"](../modules/_index_.md) › [Blockchain](_index_.blockchain.md)
 
 # Interface: Blockchain
 
 ## Hierarchy
 
-- **Blockchain**
+* **Blockchain**
 
 ## Index
 
 ### Methods
 
-- [getBlock](_index_.blockchain.md#getblock)
+* [getBlock](_index_.blockchain.md#getblock)
 
 ## Methods
 
-### getBlock
+###  getBlock
 
-▸ **getBlock**(`hash`: Buffer, `callback`: function): _void_
+▸ **getBlock**(`hash`: Buffer): *Promise‹[Block](../classes/_block_.block.md)›*
 
-_Defined in [types.ts:75](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L75)_
-
-**Parameters:**
-
-▪ **hash**: _Buffer_
-
-▪ **callback**: _function_
-
-▸ (`err`: Error | null, `block?`: [Block](../classes/_index_.block.md)): _void_
+*Defined in [types.ts:132](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L132)*
 
 **Parameters:**
 
-| Name     | Type                                 |
-| -------- | ------------------------------------ |
-| `err`    | Error &#124; null                    |
-| `block?` | [Block](../classes/_index_.block.md) |
+Name | Type |
+------ | ------ |
+`hash` | Buffer |
 
-**Returns:** _void_
+**Returns:** *Promise‹[Block](../classes/_block_.block.md)›*

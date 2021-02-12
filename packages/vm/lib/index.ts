@@ -1,43 +1,72 @@
-import BN = require('bn.js')
-import Account from 'ethereumjs-account'
-import Blockchain from 'ethereumjs-blockchain'
-import Common from 'ethereumjs-common'
-import { StateManager } from './state'
+import { SecureTrie as Trie } from 'merkle-patricia-tree'
+import { Account, Address } from 'ethereumjs-util'
+import Blockchain from '@ethereumjs/blockchain'
+import Common from '@ethereumjs/common'
+import { StateManager, DefaultStateManager } from './state/index'
 import { default as runCode, RunCodeOpts } from './runCode'
 import { default as runCall, RunCallOpts } from './runCall'
 import { default as runTx, RunTxOpts, RunTxResult } from './runTx'
 import { default as runBlock, RunBlockOpts, RunBlockResult } from './runBlock'
 import { EVMResult, ExecResult } from './evm/evm'
 import { OpcodeList, getOpcodesForHF } from './evm/opcodes'
+import { precompiles } from './evm/precompiles'
 import runBlockchain from './runBlockchain'
-import PStateManager from './state/promisified'
-const promisify = require('util.promisify')
 const AsyncEventEmitter = require('async-eventemitter')
-const Trie = require('merkle-patricia-tree/secure.js')
+const promisify = require('util.promisify')
+
+// eslint-disable-next-line no-undef
+const IS_BROWSER = typeof (<any>globalThis).window === 'object' // very ugly way to detect if we are running in a browser
+let mcl: any
+let mclInitPromise: any
+
+if (!IS_BROWSER) {
+  mcl = require('mcl-wasm')
+  mclInitPromise = mcl.init(mcl.BLS12_381)
+}
 
 /**
  * Options for instantiating a [[VM]].
  */
 export interface VMOpts {
   /**
-   * The chain the VM operates on
+   * Use a [common](https://github.com/ethereumjs/ethereumjs-vm/packages/common) instance
+   * if you want to change the chain setup.
+   *
+   * ### Possible Values
+   *
+   * - `chain`: all chains supported by `Common` or a custom chain
+   * - `hardfork`: `mainnet` hardforks up to the `MuirGlacier` hardfork
+   * - `eips`: `2537` (usage e.g. `eips: [ 2537, ]`)
+   *
+   * ### Supported EIPs
+   *
+   * - [EIP-2537](https://eips.ethereum.org/EIPS/eip-2537) (`experimental`) - BLS12-381 precompiles
+   * - [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929) (`experimental`) - Gas cost increases for state access opcodes
+   *
+   * *Annotations:*
+   *
+   * - `experimental`: behaviour can change on patch versions
+   *
+   * ### Default Setup
+   *
+   * Default setup if no `Common` instance is provided:
+   *
+   * - `chain`: `mainnet`
+   * - `hardfork`: `istanbul`
+   * - `eips`: `[]`
    */
-  chain?: string
-  /**
-   * Hardfork rules to be used
-   */
-  hardfork?: string
+  common?: Common
   /**
    * A [[StateManager]] instance to use as the state store (Beta API)
    */
   stateManager?: StateManager
   /**
-   * A [merkle-patricia-tree](https://github.com/ethereumjs/merkle-patricia-tree) instance for the state tree (ignored if stateManager is passed)
+   * An [merkle-patricia-tree](https://github.com/ethereumjs/ethereumjs-vm/tree/master/packages/trie) instance for the state tree (ignored if stateManager is passed)
    * @deprecated
    */
   state?: any // TODO
   /**
-   * A [blockchain](https://github.com/ethereumjs/ethereumjs-blockchain) object for storing/retrieving blocks
+   * A [blockchain](https://github.com/ethereumjs/ethereumjs-vm/packages/blockchain) object for storing/retrieving blocks
    */
   blockchain?: Blockchain
   /**
@@ -49,13 +78,24 @@ export interface VMOpts {
    *
    * Setting this to true has the effect of precompiled contracts' gas costs matching mainnet's from
    * the very first call, which is intended for testing networks.
+   *
+   * Default: `false`
    */
   activatePrecompiles?: boolean
   /**
-   * Allows unlimited contract sizes while debugging. By setting this to `true`, the check for contract size limit of 24KB (see [EIP-170](https://git.io/vxZkK)) is bypassed
+   * Allows unlimited contract sizes while debugging. By setting this to `true`, the check for
+   * contract size limit of 24KB (see [EIP-170](https://git.io/vxZkK)) is bypassed.
+   *
+   * Default: `false` [ONLY set to `true` during debugging]
    */
   allowUnlimitedContractSize?: boolean
-  common?: Common
+
+  /**
+   * Select hardfork based upon block number. This automatically switches to the right hard fork based upon the block number.
+   *
+   * Default: `false`
+   */
+  selectHardforkByBlockNumber?: boolean
 }
 
 /**
@@ -65,75 +105,164 @@ export interface VMOpts {
  * This class is an AsyncEventEmitter, please consult the README to learn how to use it.
  */
 export default class VM extends AsyncEventEmitter {
-  opts: VMOpts
-  _common: Common
-  stateManager: StateManager
-  blockchain: Blockchain
-  allowUnlimitedContractSize: boolean
-  _opcodes: OpcodeList
+  /**
+   * The StateManager used by the VM
+   */
+  readonly stateManager: StateManager
+  /**
+   * The blockchain the VM operates on
+   */
+  readonly blockchain: Blockchain
+
+  readonly _common: Common
+
+  protected readonly _opts: VMOpts
+  protected _isInitialized: boolean = false
+  protected readonly _allowUnlimitedContractSize: boolean
+  protected _opcodes: OpcodeList
+  protected readonly _selectHardforkByBlockNumber: boolean
+
+  /**
+   * Cached emit() function, not for public usage
+   * set to public due to implementation internals
+   * @hidden
+   */
   public readonly _emit: (topic: string, data: any) => Promise<void>
-  public readonly pStateManager: PStateManager
+  /**
+   * Pointer to the mcl package, not for public usage
+   * set to public due to implementation internals
+   * @hidden
+   */
+  public readonly _mcl: any //
+
+  /**
+   * VM async constructor. Creates engine instance and initializes it.
+   *
+   * @param opts VM engine constructor options
+   */
+  static async create(opts: VMOpts = {}): Promise<VM> {
+    const vm = new this(opts)
+    await vm.init()
+    return vm
+  }
 
   /**
    * Instantiates a new [[VM]] Object.
-   * @param opts - Default values for the options are:
-   *  - `chain`: 'mainnet'
-   *  - `hardfork`: 'petersburg' [supported: 'byzantium', 'constantinople', 'petersburg', 'istanbul' (DRAFT) (will throw on unsupported)]
-   *  - `activatePrecompiles`: false
-   *  - `allowUnlimitedContractSize`: false [ONLY set to `true` during debugging]
+   * @param opts
    */
   constructor(opts: VMOpts = {}) {
     super()
 
-    this.opts = opts
+    this._opts = opts
+
+    // Throw on chain or hardfork options removed in latest major release
+    // to prevent implicit chain setup on a wrong chain
+    if ('chain' in opts || 'hardfork' in opts) {
+      throw new Error('Chain/hardfork options are not allowed any more on initialization')
+    }
 
     if (opts.common) {
-      if (opts.chain || opts.hardfork) {
-        throw new Error(
-          'You can only instantiate the VM class with one of: opts.common, or opts.chain and opts.hardfork',
-        )
+      //EIPs
+      const supportedEIPs = [2537, 2565, 2929]
+      for (const eip of opts.common.eips()) {
+        if (!supportedEIPs.includes(eip)) {
+          throw new Error(`${eip} is not supported by the VM`)
+        }
       }
 
       this._common = opts.common
     } else {
-      const chain = opts.chain ? opts.chain : 'mainnet'
-      const hardfork = opts.hardfork ? opts.hardfork : 'petersburg'
+      const DEFAULT_CHAIN = 'mainnet'
       const supportedHardforks = [
+        'chainstart',
+        'homestead',
+        'dao',
+        'tangerineWhistle',
+        'spuriousDragon',
         'byzantium',
         'constantinople',
         'petersburg',
         'istanbul',
         'muirGlacier',
+        'berlin',
       ]
 
-      this._common = new Common(chain, hardfork, supportedHardforks)
+      this._common = new Common({
+        chain: DEFAULT_CHAIN,
+        supportedHardforks,
+      })
     }
 
     // Set list of opcodes based on HF
+    // TODO: make this EIP-friendly
     this._opcodes = getOpcodesForHF(this._common)
 
     if (opts.stateManager) {
       this.stateManager = opts.stateManager
     } else {
       const trie = opts.state || new Trie()
-      if (opts.activatePrecompiles) {
-        for (let i = 1; i <= 8; i++) {
-          trie.put(new BN(i).toArrayLike(Buffer, 'be', 20), new Account().serialize())
-        }
-      }
-      this.stateManager = new StateManager({ trie, common: this._common })
+      this.stateManager = new DefaultStateManager({
+        trie,
+        common: this._common,
+      })
     }
-
-    this.pStateManager = new PStateManager(this.stateManager)
 
     this.blockchain = opts.blockchain || new Blockchain({ common: this._common })
 
-    this.allowUnlimitedContractSize =
-      opts.allowUnlimitedContractSize === undefined ? false : opts.allowUnlimitedContractSize
+    this._allowUnlimitedContractSize = opts.allowUnlimitedContractSize || false
+
+    this._selectHardforkByBlockNumber = opts.selectHardforkByBlockNumber ?? false
+
+    if (this._common.eips().includes(2537)) {
+      if (IS_BROWSER) {
+        throw new Error('EIP-2537 is currently not supported in browsers')
+      } else {
+        this._mcl = mcl
+      }
+    }
 
     // We cache this promisified function as it's called from the main execution loop, and
     // promisifying each time has a huge performance impact.
     this._emit = promisify(this.emit.bind(this))
+  }
+
+  _updateOpcodes() {
+    this._opcodes = getOpcodesForHF(this._common)
+  }
+
+  async init(): Promise<void> {
+    if (this._isInitialized) {
+      return
+    }
+
+    await this.blockchain.initPromise
+
+    if (this._opts.activatePrecompiles && !this._opts.stateManager) {
+      await this.stateManager.checkpoint()
+      // put 1 wei in each of the precompiles in order to make the accounts non-empty and thus not have them deduct `callNewAccount` gas.
+      await Promise.all(
+        Object.keys(precompiles)
+          .map((k: string): Address => new Address(Buffer.from(k, 'hex')))
+          .map(async (address: Address) => {
+            const account = Account.fromAccountData({ balance: 1 })
+            await this.stateManager.putAccount(address, account)
+          })
+      )
+      await this.stateManager.commit()
+    }
+
+    if (this._common.eips().includes(2537)) {
+      if (IS_BROWSER) {
+        throw new Error('EIP-2537 is currently not supported in browsers')
+      } else {
+        const mcl = this._mcl
+        await mclInitPromise // ensure that mcl is initialized.
+        mcl.setMapToMode(mcl.IRTF) // set the right map mode; otherwise mapToG2 will return wrong values.
+        mcl.verifyOrderG1(1) // subgroup checks for G1
+        mcl.verifyOrderG2(1) // subgroup checks for G2
+      }
+    }
+    this._isInitialized = true
   }
 
   /**
@@ -141,10 +270,11 @@ export default class VM extends AsyncEventEmitter {
    *
    * This method modifies the state.
    *
-   * @param blockchain -  A [blockchain](https://github.com/ethereum/ethereumjs-blockchain) object to process
+   * @param blockchain -  An [@ethereumjs/blockchain](https://github.com/ethereumjs/ethereumjs-vm/tree/master/packages/blockchain) object to process
    */
-  runBlockchain(blockchain: any): Promise<void> {
-    return runBlockchain.bind(this)(blockchain)
+  async runBlockchain(blockchain?: Blockchain, maxBlocks?: number): Promise<void | number> {
+    await this.init()
+    return runBlockchain.bind(this)(blockchain, maxBlocks)
   }
 
   /**
@@ -154,10 +284,11 @@ export default class VM extends AsyncEventEmitter {
    * reverted if an exception is raised. If it's `false`, it won't revert if the block's header is
    * invalid. If an error is thrown from an event handler, the state may or may not be reverted.
    *
-   * @param opts - Default values for options:
+   * @param {RunBlockOpts} opts - Default values for options:
    *  - `generate`: false
    */
-  runBlock(opts: RunBlockOpts): Promise<RunBlockResult> {
+  async runBlock(opts: RunBlockOpts): Promise<RunBlockResult> {
+    await this.init()
     return runBlock.bind(this)(opts)
   }
 
@@ -167,8 +298,11 @@ export default class VM extends AsyncEventEmitter {
    * This method modifies the state. If an error is thrown, the modifications are reverted, except
    * when the error is thrown from an event handler. In the latter case the state may or may not be
    * reverted.
+   *
+   * @param {RunTxOpts} opts
    */
-  runTx(opts: RunTxOpts): Promise<RunTxResult> {
+  async runTx(opts: RunTxOpts): Promise<RunTxResult> {
+    await this.init()
     return runTx.bind(this)(opts)
   }
 
@@ -176,8 +310,11 @@ export default class VM extends AsyncEventEmitter {
    * runs a call (or create) operation.
    *
    * This method modifies the state.
+   *
+   * @param {RunCallOpts} opts
    */
-  runCall(opts: RunCallOpts): Promise<EVMResult> {
+  async runCall(opts: RunCallOpts): Promise<EVMResult> {
+    await this.init()
     return runCall.bind(this)(opts)
   }
 
@@ -185,8 +322,11 @@ export default class VM extends AsyncEventEmitter {
    * Runs EVM code.
    *
    * This method modifies the state.
+   *
+   * @param {RunCodeOpts} opts
    */
-  runCode(opts: RunCodeOpts): Promise<ExecResult> {
+  async runCode(opts: RunCodeOpts): Promise<ExecResult> {
+    await this.init()
     return runCode.bind(this)(opts)
   }
 

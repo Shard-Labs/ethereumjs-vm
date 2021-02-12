@@ -1,14 +1,23 @@
-import * as assert from 'assert'
+import assert from 'assert'
+
+const ceil = (value: number, ceiling: number): number => {
+  const r = value % ceiling
+  if (r === 0) {
+    return value
+  } else {
+    return value + ceiling - r
+  }
+}
 
 /**
  * Memory implements a simple memory model
  * for the ethereum virtual machine.
  */
 export default class Memory {
-  _store: number[]
+  _store: Buffer
 
   constructor() {
-    this._store = []
+    this._store = Buffer.alloc(0)
   }
 
   /**
@@ -23,7 +32,7 @@ export default class Memory {
     const newSize = ceil(offset + size, 32)
     const sizeDiff = newSize - this._store.length
     if (sizeDiff > 0) {
-      this._store = this._store.concat(new Array(sizeDiff).fill(0))
+      this._store = Buffer.concat([this._store, Buffer.alloc(sizeDiff)])
     }
   }
 
@@ -54,20 +63,17 @@ export default class Memory {
    * @param size - How many bytes to read
    */
   read(offset: number, size: number): Buffer {
-    const loaded = this._store.slice(offset, offset + size)
-    // Fill the remaining length with zeros
-    for (let i = loaded.length; i < size; i++) {
-      loaded[i] = 0
-    }
-    return Buffer.from(loaded)
-  }
-}
+    const returnBuffer = Buffer.allocUnsafe(size)
+    // Copy the stored "buffer" from memory into the return Buffer
 
-const ceil = (value: number, ceiling: number): number => {
-  const r = value % ceiling
-  if (r === 0) {
-    return value
-  } else {
-    return value + ceiling - r
+    const loaded = Buffer.from(this._store.slice(offset, offset + size))
+    returnBuffer.fill(loaded, 0, loaded.length)
+
+    if (loaded.length < size) {
+      // fill the remaining part of the Buffer with zeros
+      returnBuffer.fill(0, loaded.length, size)
+    }
+
+    return returnBuffer
   }
 }

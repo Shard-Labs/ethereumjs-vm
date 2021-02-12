@@ -22,10 +22,6 @@ export interface TxData {
   s: string
 }
 
-export interface FakeTxData extends TxData {
-  from: string
-}
-
 // The type of each entry from ./ttTransactionTestEip155VitaliksTests.json
 export interface VitaliksTestsDataEntry {
   blocknumber: string
@@ -44,7 +40,9 @@ export type TxsJsonEntry = {
   raw: string[]
 }
 
-export type ForksData = { [forkName in ForkName]: { hash?: string; sender?: string } }
+export type ForksData = {
+  [forkName in ForkName]: { hash?: string; sender?: string }
+}
 
 export type OfficialTransactionTestData = ForksData & {
   _info: {

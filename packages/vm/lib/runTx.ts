@@ -1,25 +1,27 @@
-import BN = require('bn.js')
-import { toBuffer } from 'ethereumjs-util'
-import Account from 'ethereumjs-account'
-import { Transaction } from 'ethereumjs-tx'
+import { debug as createDebugLogger } from 'debug'
+import { Address, BN } from 'ethereumjs-util'
+import { Block } from '@ethereumjs/block'
+import { Transaction } from '@ethereumjs/tx'
 import VM from './index'
 import Bloom from './bloom'
 import { default as EVM, EVMResult } from './evm/evm'
+import { short } from './evm/opcodes/util'
 import Message from './evm/message'
 import TxContext from './evm/txContext'
-import PStateManager from './state/promisified'
-const Block = require('ethereumjs-block')
+
+const debug = createDebugLogger('vm:tx')
+const debugGas = createDebugLogger('vm:tx:gas')
 
 /**
  * Options for the `runTx` method.
  */
 export interface RunTxOpts {
   /**
-   * The block to which the `tx` belongs
+   * The `@ethereumjs/block` the `tx` belongs to. If omitted a default blank block will be used.
    */
-  block?: any
+  block?: Block
   /**
-   * A [`Transaction`](https://github.com/ethereum/ethereumjs-tx) to run
+   * An `@ethereumjs/tx` to run
    */
   tx: Transaction
   /**
@@ -30,6 +32,12 @@ export interface RunTxOpts {
    * If true, skips the balance check
    */
   skipBalance?: boolean
+
+  /**
+   * If true, skips the validation of the tx's gas limit
+   * agains the block's gas limit.
+   */
+  skipBlockGasLimitValidation?: boolean
 }
 
 /**
@@ -50,46 +58,56 @@ export interface RunTxResult extends EVMResult {
   gasRefund?: BN
 }
 
+export interface AfterTxEvent extends RunTxResult {
+  /**
+   * The transaction which just got finished
+   */
+  transaction: Transaction
+}
+
 /**
  * @ignore
  */
 export default async function runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
-  if (opts === undefined) {
-    throw new Error('invalid input, opts must be provided')
-  }
-
   // tx is required
   if (!opts.tx) {
     throw new Error('invalid input, tx is required')
   }
 
   // create a reasonable default if no block is given
-  if (!opts.block) {
-    opts.block = new Block()
-  }
+  opts.block = opts.block ?? Block.fromBlockData({}, { common: opts.tx.common })
 
-  if (new BN(opts.block.header.gasLimit).lt(new BN(opts.tx.gasLimit))) {
+  if (
+    opts.skipBlockGasLimitValidation !== true &&
+    opts.block.header.gasLimit.lt(opts.tx.gasLimit)
+  ) {
     throw new Error('tx has a higher gas limit than the block')
   }
 
-  const state = this.pStateManager
-
+  const state = this.stateManager
   await state.checkpoint()
+  debug('-'.repeat(100))
+  debug(`tx checkpoint`)
 
   try {
     const result = await _runTx.bind(this)(opts)
     await state.commit()
+    debug(`tx checkpoint committed`)
     return result
   } catch (e) {
     await state.revert()
+    debug(`tx checkpoint reverted`)
     throw e
   }
 }
 
 async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
-  const block = opts.block
-  const tx = opts.tx
-  const state = this.pStateManager
+  const state = this.stateManager
+  const { tx, block } = opts
+
+  if (!block) {
+    throw new Error('block required')
+  }
 
   /**
    * The `beforeTx` event
@@ -100,86 +118,133 @@ async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
    */
   await this._emit('beforeTx', tx)
 
+  const caller = tx.getSenderAddress()
+  debug(`New tx run hash=${opts.tx.hash().toString('hex')} sender=${caller.toString()}`)
+
   // Validate gas limit against base fee
   const basefee = tx.getBaseFee()
-  const gasLimit = new BN(tx.gasLimit)
+  const gasLimit = tx.gasLimit.clone()
   if (gasLimit.lt(basefee)) {
     throw new Error('base fee exceeds gas limit')
   }
   gasLimit.isub(basefee)
+  debugGas(`Subtracting base fee (${basefee}) from gasLimit (-> ${gasLimit})`)
 
   // Check from account's balance and nonce
-  let fromAccount = await state.getAccount(tx.getSenderAddress())
-  if (!opts.skipBalance && new BN(fromAccount.balance).lt(tx.getUpfrontCost())) {
-    throw new Error(
-      `sender doesn't have enough funds to send tx. The upfront cost is: ${tx
-        .getUpfrontCost()
-        .toString()}` +
-        ` and the sender's account only has: ${new BN(fromAccount.balance).toString()}`,
-    )
-  } else if (!opts.skipNonce && !new BN(fromAccount.nonce).eq(new BN(tx.nonce))) {
-    throw new Error(
-      `the tx doesn't have the correct nonce. account has nonce of: ${new BN(
-        fromAccount.nonce,
-      ).toString()} tx has nonce of: ${new BN(tx.nonce).toString()}`,
-    )
+  let fromAccount = await state.getAccount(caller)
+  const { nonce, balance } = fromAccount
+
+  if (!opts.skipBalance) {
+    const cost = tx.getUpfrontCost()
+    if (balance.lt(cost)) {
+      throw new Error(
+        `sender doesn't have enough funds to send tx. The upfront cost is: ${cost} and the sender's account only has: ${balance}`
+      )
+    }
+  } else if (!opts.skipNonce) {
+    if (!nonce.eq(tx.nonce)) {
+      throw new Error(
+        `the tx doesn't have the correct nonce. account has nonce of: ${nonce} tx has nonce of: ${tx.nonce}`
+      )
+    }
   }
+
   // Update from account's nonce and balance
-  fromAccount.nonce = toBuffer(new BN(fromAccount.nonce).addn(1))
-  fromAccount.balance = toBuffer(
-    new BN(fromAccount.balance).sub(new BN(tx.gasLimit).mul(new BN(tx.gasPrice))),
+  fromAccount.nonce.iaddn(1)
+  const txCost = tx.gasLimit.mul(tx.gasPrice)
+  fromAccount.balance.isub(txCost)
+  await state.putAccount(caller, fromAccount)
+  debug(
+    `Update fromAccount (caller) nonce (-> ${fromAccount.nonce}) and balance(-> ${fromAccount.balance})`
   )
-  await state.putAccount(tx.getSenderAddress(), fromAccount)
 
   /*
    * Execute message
    */
-  const txContext = new TxContext(tx.gasPrice, tx.getSenderAddress())
+  const txContext = new TxContext(tx.gasPrice, caller)
+  const { value, data, to } = tx
   const message = new Message({
-    caller: tx.getSenderAddress(),
-    gasLimit: gasLimit,
-    to: tx.to.toString('hex') !== '' ? tx.to : undefined,
-    value: tx.value,
-    data: tx.data,
+    caller,
+    gasLimit,
+    to,
+    value,
+    data,
   })
-  state._wrapped._clearOriginalStorageCache()
   const evm = new EVM(this, txContext, block)
+  debug(
+    `Running tx=0x${tx
+      .hash()
+      .toString('hex')} with caller=${caller.toString()} gasLimit=${gasLimit} to=${
+      to ? to.toString() : ''
+    } value=${value} data=0x${short(data)}`
+  )
   const results = (await evm.executeMessage(message)) as RunTxResult
+  debug('-'.repeat(100))
+  debug(
+    `Received tx results gasUsed=${results.gasUsed} execResult: [ gasUsed=${
+      results.gasUsed
+    } exceptionError=${
+      results.execResult.exceptionError ? results.execResult.exceptionError.error : ''
+    } returnValue=${short(results.execResult.returnValue)} gasRefund=${
+      results.execResult.gasRefund
+    } ]`
+  )
 
   /*
    * Parse results
    */
   // Generate the bloom for the tx
   results.bloom = txLogsBloom(results.execResult.logs)
+  debug(`Generated tx bloom with logs=${results.execResult.logs?.length}`)
   // Caculate the total gas used
-  results.gasUsed = results.gasUsed.add(basefee)
+  results.gasUsed.iadd(basefee)
+  debugGas(`tx add baseFee ${basefee} to gasUsed (-> ${results.gasUsed})`)
   // Process any gas refund
-  const gasRefund = evm._refund
-  if (gasRefund) {
-    if (gasRefund.lt(results.gasUsed.divn(2))) {
-      results.gasUsed.isub(gasRefund)
-    } else {
-      results.gasUsed.isub(results.gasUsed.divn(2))
+  // TODO: determine why the gasRefund from execResult is not used here directly
+  let gasRefund = evm._refund
+  if (gasRefund.gtn(0)) {
+    if (!gasRefund.lt(results.gasUsed.divn(2))) {
+      gasRefund = results.gasUsed.divn(2)
     }
+    results.gasUsed.isub(gasRefund)
+    debug(`Subtract tx gasRefund (${gasRefund}) from gasUsed (-> ${results.gasUsed})`)
+  } else {
+    debug(`No tx gasRefund`)
   }
-  results.amountSpent = results.gasUsed.mul(new BN(tx.gasPrice))
+  results.amountSpent = results.gasUsed.mul(tx.gasPrice)
 
   // Update sender's balance
-  fromAccount = await state.getAccount(tx.getSenderAddress())
-  const finalFromBalance = new BN(tx.gasLimit)
-    .sub(results.gasUsed)
-    .mul(new BN(tx.gasPrice))
-    .add(new BN(fromAccount.balance))
-  fromAccount.balance = toBuffer(finalFromBalance)
-  await state.putAccount(toBuffer(tx.getSenderAddress()), fromAccount)
+  fromAccount = await state.getAccount(caller)
+  const actualTxCost = results.gasUsed.mul(tx.gasPrice)
+  const txCostDiff = txCost.sub(actualTxCost)
+  fromAccount.balance.iadd(txCostDiff)
+  await state.putAccount(caller, fromAccount)
+  debug(
+    `Refunded txCostDiff (${txCostDiff}) to fromAccount (caller) balance (-> ${fromAccount.balance})`
+  )
 
   // Update miner's balance
-  const minerAccount = await state.getAccount(block.header.coinbase)
-  // add the amount spent on gas to the miner's account
-  minerAccount.balance = toBuffer(new BN(minerAccount.balance).add(results.amountSpent))
-  if (!new BN(minerAccount.balance).isZero()) {
-    await state.putAccount(block.header.coinbase, minerAccount)
+  let miner
+  if (this._common.consensusType() === 'pow') {
+    miner = block.header.coinbase
+  } else {
+    // Backwards-compatibilty check
+    // TODO: can be removed along VM v5 release
+    if ('cliqueSigner' in block.header) {
+      miner = block.header.cliqueSigner()
+    } else {
+      miner = Address.zero()
+    }
   }
+  const minerAccount = await state.getAccount(miner)
+  // add the amount spent on gas to the miner's account
+  minerAccount.balance.iadd(results.amountSpent)
+
+  // Put the miner account into the state. If the balance of the miner account remains zero, note that
+  // the state.putAccount function puts this into the "touched" accounts. This will thus be removed when
+  // we clean the touched accounts below in case we are in a fork >= SpuriousDragon
+  await state.putAccount(miner, minerAccount)
+  debug(`tx update miner account (${miner.toString()}) balance (-> ${minerAccount.balance})`)
 
   /*
    * Cleanup accounts
@@ -187,10 +252,13 @@ async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
   if (results.execResult.selfdestruct) {
     const keys = Object.keys(results.execResult.selfdestruct)
     for (const k of keys) {
-      await state.putAccount(Buffer.from(k, 'hex'), new Account())
+      const address = new Address(Buffer.from(k, 'hex'))
+      await state.deleteAccount(address)
+      debug(`tx selfdestruct on address=${address.toString()}`)
     }
   }
   await state.cleanupTouchedAccounts()
+  state.clearOriginalStorageCache()
 
   /**
    * The `afterTx` event
@@ -199,7 +267,9 @@ async function _runTx(this: VM, opts: RunTxOpts): Promise<RunTxResult> {
    * @type {Object}
    * @property {Object} result result of the transaction
    */
-  await this._emit('afterTx', results)
+  const event: AfterTxEvent = { transaction: tx, ...results }
+  await this._emit('afterTx', event)
+  debug(`tx run finished hash=${opts.tx.hash().toString('hex')} sender=${caller.toString()}`)
 
   return results
 }

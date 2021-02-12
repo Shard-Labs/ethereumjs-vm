@@ -1,100 +1,95 @@
-import { Buffer } from 'buffer'
-import Common from 'ethereumjs-common'
+import { AddressLike, BNLike, BufferLike } from 'ethereumjs-util'
+import Common from '@ethereumjs/common'
 
 /**
- * Any object that can be transformed into a `Buffer`
+ * The options for initializing a Transaction.
  */
-export interface TransformableToBuffer {
-  toBuffer(): Buffer
+export interface TxOptions {
+  /**
+   * A Common object defining the chain and hardfork for the transaction.
+   *
+   * Object will be internally copied so that tx behavior don't incidentally
+   * change on future HF changes.
+   *
+   * Default: `Common` object set to `mainnet` and the default hardfork as defined in the `Common` class.
+   *
+   * Current default hardfork: `istanbul`
+   */
+  common?: Common
+  /**
+   * A transaction object by default gets frozen along initialization. This gives you
+   * strong additional security guarantees on the consistency of the tx parameters.
+   *
+   * If you need to deactivate the tx freeze - e.g. because you want to subclass tx and
+   * add aditional properties - it is strongly encouraged that you do the freeze yourself
+   * within your code instead.
+   *
+   * Default: true
+   */
+  freeze?: boolean
 }
 
 /**
- * A hex string prefixed with `0x`.
- */
-export type PrefixedHexString = string
-
-/**
- * A Buffer, hex string prefixed with `0x`, Number, or an object with a toBuffer method such as BN.
- */
-export type BufferLike = Buffer | TransformableToBuffer | PrefixedHexString | number
-
-/**
- * A transaction's data.
+ * An object with an optional field with each of the transaction's values.
  */
 export interface TxData {
   /**
-   * The transaction's gas limit.
+   * The transaction's nonce.
    */
-  gasLimit?: BufferLike
+  nonce?: BNLike
 
   /**
    * The transaction's gas price.
    */
-  gasPrice?: BufferLike
+  gasPrice?: BNLike
+
+  /**
+   * The transaction's gas limit.
+   */
+  gasLimit?: BNLike
 
   /**
    * The transaction's the address is sent to.
    */
-  to?: BufferLike
+  to?: AddressLike
 
   /**
-   * The transaction's nonce.
+   * The amount of Ether sent.
    */
-  nonce?: BufferLike
+  value?: BNLike
 
   /**
-   * This will contain the data of the message or the init of a contract
+   * This will contain the data of the message or the init of a contract.
    */
   data?: BufferLike
 
   /**
    * EC recovery ID.
    */
-  v?: BufferLike
+  v?: BNLike
 
   /**
    * EC signature parameter.
    */
-  r?: BufferLike
+  r?: BNLike
 
   /**
    * EC signature parameter.
    */
-  s?: BufferLike
-
-  /**
-   * The amount of Ether sent.
-   */
-  value?: BufferLike
+  s?: BNLike
 }
 
 /**
- * The data of a fake (self-signing) transaction.
+ * An object with all of the transaction's values represented as strings.
  */
-export interface FakeTxData extends TxData {
-  /**
-   * The sender of the Tx.
-   */
-  from?: BufferLike
-}
-
-/**
- * The transaction's options. This could be specified using a Common object, or `chain` and `hardfork`. Defaults to
- * mainnet.
- */
-export interface TransactionOptions {
-  /**
-   * A Common object defining the chain and the hardfork a transaction belongs to.
-   */
-  common?: Common
-
-  /**
-   * The chain of the transaction, default: 'mainnet'
-   */
-  chain?: number | string
-
-  /**
-   * The hardfork of the transaction, default: 'petersburg'
-   */
-  hardfork?: string
+export interface JsonTx {
+  nonce?: string
+  gasPrice?: string
+  gasLimit?: string
+  to?: string
+  data?: string
+  v?: string
+  r?: string
+  s?: string
+  value?: string
 }

@@ -1,4 +1,4 @@
-[ethereumjs-block](../README.md) › ["types"](../modules/_types_.md) › [BlockData](_types_.blockdata.md)
+[@ethereumjs/block](../README.md) › ["types"](../modules/_types_.md) › [BlockData](_types_.blockdata.md)
 
 # Interface: BlockData
 
@@ -6,36 +6,38 @@ A block's data.
 
 ## Hierarchy
 
-- **BlockData**
+* **BlockData**
 
 ## Index
 
 ### Properties
 
-- [header](_types_.blockdata.md#optional-header)
-- [transactions](_types_.blockdata.md#optional-transactions)
-- [uncleHeaders](_types_.blockdata.md#optional-uncleheaders)
+* [header](_types_.blockdata.md#optional-header)
+* [transactions](_types_.blockdata.md#optional-transactions)
+* [uncleHeaders](_types_.blockdata.md#optional-uncleheaders)
 
 ## Properties
 
 ### `Optional` header
 
-• **header**? : _Buffer | [PrefixedHexString](../modules/\_types_.md#prefixedhexstring) | [BufferLike](../modules/_types_.md#bufferlike)[] | [BlockHeaderData](_index_.blockheaderdata.md)\_
+• **header**? : *[HeaderData](_types_.headerdata.md)*
 
-_Defined in [types.ts:69](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L69)_
+*Defined in [types.ts:87](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L87)*
 
----
+Header data for the block
+
+___
 
 ### `Optional` transactions
 
-• **transactions**? : _Array‹Buffer | [PrefixedHexString](../modules/\_types_.md#prefixedhexstring) | [BufferLike](../modules/_types_.md#bufferlike)[] | TxData›\_
+• **transactions**? : *Array‹TxData›*
 
-_Defined in [types.ts:70](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L70)_
+*Defined in [types.ts:88](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L88)*
 
----
+___
 
 ### `Optional` uncleHeaders
 
-• **uncleHeaders**? : _Array‹Buffer | [PrefixedHexString](../modules/\_types_.md#prefixedhexstring) | [BufferLike](../modules/_types_.md#bufferlike)[] | [BlockHeaderData](_index_.blockheaderdata.md)›\_
+• **uncleHeaders**? : *Array‹[HeaderData](_index_.headerdata.md)›*
 
-_Defined in [types.ts:71](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L71)_
+*Defined in [types.ts:89](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L89)*

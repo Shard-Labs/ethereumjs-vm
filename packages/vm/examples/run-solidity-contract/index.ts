@@ -1,12 +1,10 @@
-import VM from '../../dist'
-
-import * as assert from 'assert'
+import assert from 'assert'
 import * as path from 'path'
 import * as fs from 'fs'
-import { promisify } from 'util'
-import * as util from 'ethereumjs-util'
-import Account from 'ethereumjs-account'
-import { Transaction } from 'ethereumjs-tx'
+import { Account, Address, BN, privateToAddress, bufferToHex } from 'ethereumjs-util'
+import { Transaction } from '@ethereumjs/tx'
+import VM from '../../dist'
+
 const abi = require('ethereumjs-abi')
 const solc = require('solc')
 
@@ -77,10 +75,8 @@ function getGreeterDeploymentBytecode(solcOutput: any): any {
 }
 
 async function getAccountNonce(vm: VM, accountPrivateKey: Buffer) {
-  const account = (await promisify(vm.stateManager.getAccount.bind(vm.stateManager))(
-    util.privateToAddress(accountPrivateKey),
-  )) as Account
-
+  const address = privateToAddress(accountPrivateKey)
+  const account = await vm.stateManager.getAccount(address)
   return account.nonce
 }
 
@@ -89,20 +85,19 @@ async function deployContract(
   senderPrivateKey: Buffer,
   deploymentBytecode: Buffer,
   greeting: string,
-): Promise<Buffer> {
+): Promise<Address> {
   // Contracts are deployed by sending their deployment bytecode to the address 0
   // The contract params should be abi-encoded and appended to the deployment bytecode.
   const params = abi.rawEncode(['string'], [greeting])
-
-  const tx = new Transaction({
+  const txData = {
     value: 0,
     gasLimit: 2000000, // We assume that 2M is enough,
     gasPrice: 1,
     data: '0x' + deploymentBytecode + params.toString('hex'),
     nonce: await getAccountNonce(vm, senderPrivateKey),
-  })
+  }
 
-  tx.sign(senderPrivateKey)
+  const tx = Transaction.fromTxData(txData).sign(senderPrivateKey)
 
   const deploymentResult = await vm.runTx({ tx })
 
@@ -116,21 +111,20 @@ async function deployContract(
 async function setGreeting(
   vm: VM,
   senderPrivateKey: Buffer,
-  contractAddress: Buffer,
+  contractAddress: Address,
   greeting: string,
 ) {
   const params = abi.rawEncode(['string'], [greeting])
-
-  const tx = new Transaction({
+  const txData = {
     to: contractAddress,
     value: 0,
     gasLimit: 2000000, // We assume that 2M is enough,
     gasPrice: 1,
     data: '0x' + abi.methodID('setGreeting', ['string']).toString('hex') + params.toString('hex'),
     nonce: await getAccountNonce(vm, senderPrivateKey),
-  })
+  }
 
-  tx.sign(senderPrivateKey)
+  const tx = Transaction.fromTxData(txData).sign(senderPrivateKey)
 
   const setGreetingResult = await vm.runTx({ tx })
 
@@ -139,7 +133,7 @@ async function setGreeting(
   }
 }
 
-async function getGreeting(vm: VM, contractAddress: Buffer, caller: Buffer) {
+async function getGreeting(vm: VM, contractAddress: Address, caller: Address) {
   const greetResult = await vm.runCall({
     to: contractAddress,
     caller: caller,
@@ -157,19 +151,23 @@ async function getGreeting(vm: VM, contractAddress: Buffer, caller: Buffer) {
 }
 
 async function main() {
-  const accountPk = new Buffer(
+  const accountPk = Buffer.from(
     'e331b6d69882b4cb4ea581d88e0b604039a3de5967688d3dcffdd2270c0fd109',
     'hex',
   )
 
-  const accountAddress = util.privateToAddress(accountPk)
+  const accountAddress = new Address(privateToAddress(accountPk))
 
-  console.log('Account:', util.bufferToHex(accountAddress))
+  console.log('Account: ', accountAddress.toString())
 
-  const account = new Account({ balance: 1e18 })
+  const acctData = {
+    nonce: 0,
+    balance: new BN(10).pow(new BN(18)), // 1 eth
+  }
+  const account = Account.fromAccountData(acctData)
 
   const vm = new VM()
-  await promisify(vm.stateManager.putAccount.bind(vm.stateManager))(accountAddress, account)
+  await vm.stateManager.putAccount(accountAddress, account)
 
   console.log('Set account a balance of 1 ETH')
 
@@ -188,7 +186,7 @@ async function main() {
 
   const contractAddress = await deployContract(vm, accountPk, bytecode, INITIAL_GREETING)
 
-  console.log('Contract address:', util.bufferToHex(contractAddress))
+  console.log('Contract address:', contractAddress.toString())
 
   const greeting = await getGreeting(vm, contractAddress, accountAddress)
 
@@ -211,7 +209,7 @@ async function main() {
 
 main()
   .then(() => process.exit(0))
-  .catch(err => {
+  .catch((err) => {
     console.error(err)
     process.exit(1)
   })

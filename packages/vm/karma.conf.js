@@ -1,30 +1,41 @@
 // Karma configuration
 // Generated on Fri Mar 01 2019 22:02:29 GMT+0100 (CET)
 
-module.exports = function(config) {
+module.exports = function (config) {
   config.set({
-    // base path that will be used to resolve all patterns (eg. files, exclude)
-    basePath: '',
-
     // frameworks to use
-    // available frameworks: https://npmjs.org/browse/keyword/karma-adapter
-    frameworks: ['browserify', 'tap'],
+    // available frameworks: https://www.npmjs.com/browse/keyword/karma-adapter
+    frameworks: ['karma-typescript', 'tap'],
 
     // list of files / patterns to load in the browser
-    files: ['./tests/api/**/*.js'],
+    files: ['./tests/**/*.ts', './lib/**/*.ts'],
 
     // list of files / patterns to exclude
     exclude: [],
 
     // preprocess matching files before serving them to the browser
-    // available preprocessors: https://npmjs.org/browse/keyword/karma-preprocessor
+    // available preprocessors: https://www.npmjs.com/browse/keyword/karma-preprocessor
     preprocessors: {
-      './tests/api/**/*.js': ['browserify'],
+      '**/*.ts': ['karma-typescript'],
+    },
+
+    karmaTypescriptConfig: {
+      compilerOptions: {
+        resolveJsonModule: true,
+        esModuleInterop: true,
+      },
+      bundlerOptions: {
+        entrypoints: /\.spec\.ts$/,
+      },
+    },
+
+    proxies: {
+      '/mcl_c384_256.wasm': '../../node_modules/mcl-wasm/mcl_c384_256.wasm',
     },
 
     // test results reporter to use
     // possible values: 'dots', 'progress'
-    // available reporters: https://npmjs.org/browse/keyword/karma-reporter
+    // available reporters: https://www.npmjs.com/browse/keyword/karma-reporter
     reporters: ['progress'],
 
     // web server port
@@ -41,7 +52,7 @@ module.exports = function(config) {
     autoWatch: false,
 
     // start these browsers
-    // available browser launchers: https://npmjs.org/browse/keyword/karma-launcher
+    // available browser launchers: https://www.npmjs.com/browse/keyword/karma-launcher
     browsers: ['FirefoxHeadless', 'ChromeHeadless'],
 
     // Continuous Integration mode
@@ -50,7 +61,7 @@ module.exports = function(config) {
 
     // Concurrency level
     // how many browser should be started simultaneous
-    concurrency: Infinity,
+    concurrency: 1,
 
     // Fail after timeout
     browserDisconnectTimeout: 100000,

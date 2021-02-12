@@ -1,4 +1,4 @@
-[ethereumjs-vm](../README.md) › ["evm/evm"](../modules/_evm_evm_.md) › [NewContractEvent](_evm_evm_.newcontractevent.md)
+[@ethereumjs/vm](../README.md) › ["evm/evm"](../modules/_evm_evm_.md) › [NewContractEvent](_evm_evm_.newcontractevent.md)
 
 # Interface: NewContractEvent
 
@@ -17,9 +17,9 @@
 
 ###  address
 
-• **address**: *Buffer*
+• **address**: *Address*
 
-*Defined in [evm/evm.ts:75](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/vm/lib/evm/evm.ts#L75)*
+*Defined in [evm/evm.ts:73](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/vm/lib/evm/evm.ts#L73)*
 
 ___
 
@@ -27,4 +27,4 @@ ___
 
 • **code**: *Buffer*
 
-*Defined in [evm/evm.ts:77](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/vm/lib/evm/evm.ts#L77)*
+*Defined in [evm/evm.ts:75](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/vm/lib/evm/evm.ts#L75)*

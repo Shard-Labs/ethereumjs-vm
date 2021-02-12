@@ -1,10 +1,8 @@
 {
   "name": "byzantium",
   "comment": "Hardfork with new precompiles, instructions and other protocol changes",
-  "eip": {
-    "url": "https://eips.ethereum.org/EIPS/eip-609",
-    "status": "Final"
-  },
+  "url": "https://eips.ethereum.org/EIPS/eip-609",
+  "status": "Final",
   "gasConfig": {},
   "gasPrices": {
     "modexpGquaddivisor": {
@@ -26,6 +24,22 @@
     "ecPairingWord": {
       "v": 80000,
       "d": "Gas costs regarding curve pairing precompile input length"
+    },
+    "revert": {
+      "v": 0,
+      "d": "Base fee of the REVERT opcode"
+    },
+    "staticcall": {
+      "v": 700,
+      "d": "Base fee of the STATICCALL opcode"
+    },
+    "returndatasize": {
+      "v": 2,
+      "d": "Base fee of the RETURNDATASIZE opcode"
+    },
+    "returndatacopy": {
+      "v": 3,
+      "d": "Base fee of the RETURNDATACOPY opcode"
     }
   },
   "vm": {},
@@ -34,7 +48,5 @@
       "v": "3000000000000000000",
       "d": "the amount a miner get rewarded for mining a block"
     }
-  },
-  "casper": {},
-  "sharding": {}
+  }
 }

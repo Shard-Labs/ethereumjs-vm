@@ -1,4 +1,4 @@
-[ethereumjs-common](../README.md) › ["types"](_types_.md)
+[@ethereumjs/common](../README.md) › ["types"](_types_.md)
 
 # Module: "types"
 
@@ -6,9 +6,10 @@
 
 ### Interfaces
 
-- [BootstrapNode](../interfaces/_types_.bootstrapnode.md)
-- [Chain](../interfaces/_types_.chain.md)
-- [GenesisBlock](../interfaces/_types_.genesisblock.md)
-- [Hardfork](../interfaces/_types_.hardfork.md)
-- [chainsType](../interfaces/_types_.chainstype.md)
-- [genesisStatesType](../interfaces/_types_.genesisstatestype.md)
+* [BootstrapNode](../interfaces/_types_.bootstrapnode.md)
+* [Chain](../interfaces/_types_.chain.md)
+* [GenesisBlock](../interfaces/_types_.genesisblock.md)
+* [Hardfork](../interfaces/_types_.hardfork.md)
+* [chainsType](../interfaces/_types_.chainstype.md)
+* [eipsType](../interfaces/_types_.eipstype.md)
+* [genesisStatesType](../interfaces/_types_.genesisstatestype.md)

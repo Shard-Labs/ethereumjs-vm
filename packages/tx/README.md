@@ -1,27 +1,26 @@
-# SYNOPSIS
+# @ethereumjs/tx
 
 [![NPM Package][tx-npm-badge]][tx-npm-link]
 [![GitHub Issues][tx-issues-badge]][tx-issues-link]
 [![Actions Status][tx-actions-badge]][tx-actions-link]
 [![Code Coverage][tx-coverage-badge]][tx-coverage-link]
-[![Gitter][gitter-badge]][gitter-link]
+[![Discord][discord-badge]][discord-link]
 
-[![js-standard-style][js-standard-style-badge]][js-standard-style-link]
+| Implements schema and functions related to Ethereum's transaction. |
+| --- |
+
+Note: this `README` reflects the state of the library from `v3.0.0` onwards. See `README` from the [standalone repository](https://github.com/ethereumjs/ethereumjs-tx) for an introduction on the last preceeding release.
 
 # INSTALL
 
-`npm install ethereumjs-tx`
+`npm install @ethereumjs/tx`
 
 # USAGE
 
-- [example](https://github.com/ethereumjs/ethereumjs-tx/blob/master/examples/transactions.ts)
+- [Example](./examples/transactions.ts)
 
-```javascript
-const EthereumTx = require('ethereumjs-tx').Transaction
-const privateKey = Buffer.from(
-  'e331b6d69882b4cb4ea581d88e0b604039a3de5967688d3dcffdd2270c0fd109',
-  'hex',
-)
+```typescript
+import { Transaction } from '@ethereumjs/tx'
 
 const txParams = {
   nonce: '0x00',
@@ -32,36 +31,62 @@ const txParams = {
   data: '0x7f7465737432000000000000000000000000000000000000000000000000000000600057',
 }
 
-// The second parameter is not necessary if these values are used
-const tx = new EthereumTx(txParams, { chain: 'mainnet', hardfork: 'petersburg' })
-tx.sign(privateKey)
-const serializedTx = tx.serialize()
+const common = new Common({ chain: 'mainnet' })
+const tx = Transaction.fromTxData(txParams, { common })
+
+const privateKey = Buffer.from(
+  'e331b6d69882b4cb4ea581d88e0b604039a3de5967688d3dcffdd2270c0fd109',
+  'hex',
+)
+
+const signedTx = tx.sign(privateKey)
+
+const serializedTx = signedTx.serialize()
 ```
 
-# Chain and Hardfork Support
+Properties of a `Transaction` object are frozen with `Object.freeze()` which gives you enhanced security and consistency properties when working with the instantiated object. This behavior can be modified using the `freeze` option in the constructor if needed.
 
-The `Transaction` and `FakeTransaction` constructors receives a second parameter that lets you specify the chain and hardfork
-to be used. By default, `mainnet` and `petersburg` will be used.
+## Fake Transaction
 
-There are two ways of customizing these. The first one, as shown in the previous section, is by
-using an object with `chain` and `hardfork` names. You can see en example of this in [./examples/ropsten-tx.ts](./examples/ropsten-tx.ts).
+Creating a fake transaction for use in e.g. `VM.runTx()` is simple, just overwrite `getSenderAddress()` with a custom [`Address`](https://github.com/ethereumjs/ethereumjs-util/blob/master/docs/classes/_address_.address.md) like so:
 
-The second option is by passing the option `common` set to an instance of [ethereumjs-common](https://github.com/ethereumjs/ethereumjs-common)' Common. This is specially useful for custom networks or chains/hardforks not yet supported by `ethereumjs-common`. You can see en example of this in [./examples/custom-chain-tx.ts](./examples/custom-chain-tx.ts).
+```typescript
+import { Address } from 'ethereumjs-util'
+import { Transaction } from '@ethereumjs/tx'
 
-## MuirGlacier Support
+_getFakeTransaction(txParams: TxParams): Transaction {
+  const from = Address.fromString(txParams.from)
+  delete txParams.from
+
+  const opts = { common: this._common }
+  const tx = Transaction.fromTxData(txParams, opts)
+
+  const fakeTx = Object.create(tx)
+  // override getSenderAddress
+  fakeTx.getSenderAddress = () => { return from }
+  return fakeTx
+}
+```
+
+# SETUP
+
+## Chain and Hardfork Support
+
+The `Transaction` constructor receives a parameter of an [`@ethereumjs/common`](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/common) object that lets you specify the chain and hardfork to be used. By default, `mainnet` and `istanbul` will be used.
+
+### MuirGlacier Support
 
 The `MuirGlacier` hardfork is supported by the library since the `v2.1.2` release.
 
-## Istanbul Support
+### Istanbul Support
 
 Support for reduced non-zero call data gas prices from the `Istanbul` hardfork
 ([EIP-2028](https://eips.ethereum.org/EIPS/eip-2028)) has been added to the library
 along with the `v2.1.1` release.
 
-# EIP-155 support
+## EIP-155 support
 
-`EIP-155` replay protection is activated since the `spuriousDragon` hardfork. To disable it, set the
-hardfork in the `Transaction`'s constructor.
+`EIP-155` replay protection is activated since the `spuriousDragon` hardfork. To disable it, set the hardfork to one earlier than `spuriousDragon`.
 
 # API
 
@@ -77,15 +102,13 @@ If you want to join for work or do improvements on the libraries have a look at 
 
 [MPL-2.0](<https://tldrlegal.com/license/mozilla-public-license-2.0-(mpl-2)>)
 
-[gitter-badge]: https://img.shields.io/gitter/room/ethereum/ethereumjs.svg
-[gitter-link]: https://gitter.im/ethereum/ethereumjs
-[js-standard-style-badge]: https://cdn.rawgit.com/feross/standard/master/badge.svg
-[js-standard-style-link]: https://github.com/feross/standard
-[tx-npm-badge]: https://img.shields.io/npm/v/ethereumjs-tx.svg
-[tx-npm-link]: https://www.npmjs.org/package/ethereumjs-tx
+[discord-badge]: https://img.shields.io/static/v1?logo=discord&label=discord&message=Join&color=blue
+[discord-link]: https://discord.gg/TNwARpR
+[tx-npm-badge]: https://img.shields.io/npm/v/@ethereumjs/tx.svg
+[tx-npm-link]: https://www.npmjs.com/package/@ethereumjs/tx
 [tx-issues-badge]: https://img.shields.io/github/issues/ethereumjs/ethereumjs-vm/package:%20tx?label=issues
 [tx-issues-link]: https://github.com/ethereumjs/ethereumjs-vm/issues?q=is%3Aopen+is%3Aissue+label%3A"package%3A+tx"
 [tx-actions-badge]: https://github.com/ethereumjs/ethereumjs-vm/workflows/Tx%20Test/badge.svg
 [tx-actions-link]: https://github.com/ethereumjs/ethereumjs-vm/actions?query=workflow%3A%22Tx+Test%22
-[tx-coverage-badge]: https://codecov.io/gh/ethereumjs/ethereumjs-vm/branch/master/graph/badge.svg?flag=tx
-[tx-coverage-link]: https://codecov.io/gh/ethereumjs/ethereumjs-vm/tree/master/packages/tx
+[tx-coverage-badge]: https://codecov.io/gh/ethereumjs/ethereumjs-monorepo/branch/master/graph/badge.svg?flag=tx
+[tx-coverage-link]: https://codecov.io/gh/ethereumjs/ethereumjs-monorepo/tree/master/packages/tx

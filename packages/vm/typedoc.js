@@ -6,7 +6,7 @@ module.exports = {
   readme: 'none',
   gitRevision: 'master',
   exclude: [
-    'test/**/*.ts',
+    'tests/**/*.ts',
     'lib/bloom/*.ts',
     'lib/evm/precompiles/*.ts',
     'lib/evm/eei.ts',
@@ -18,7 +18,6 @@ module.exports = {
     'lib/evm/stack.ts',
     'lib/evm/txContext.ts',
     'lib/state/cache.ts',
-    'lib/state/promisified.ts',
   ],
   excludeNotExported: true,
   excludePrivate: true,

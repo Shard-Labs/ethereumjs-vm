@@ -1,8 +1,26 @@
-import { FakeTransaction } from 'ethereumjs-tx'
-import * as ethUtil from 'ethereumjs-util'
-import { Block, ChainOptions } from './index'
+import { Transaction, TxData } from '@ethereumjs/tx'
+import { toBuffer, setLengthLeft } from 'ethereumjs-util'
+import { Block, BlockOptions } from './index'
 
 import blockHeaderFromRpc from './header-from-rpc'
+
+function normalizeTxParams(_txParams: any) {
+  const txParams = Object.assign({}, _txParams)
+
+  txParams.gasLimit = txParams.gasLimit === undefined ? txParams.gas : txParams.gasLimit
+  txParams.data = txParams.data === undefined ? txParams.input : txParams.data
+
+  // strict byte length checking
+  txParams.to = txParams.to ? setLengthLeft(toBuffer(txParams.to), 20) : null
+
+  // v as raw signature value {0,1}
+  // v is the recovery bit and can be either {0,1} or {27,28}.
+  // https://ethereum.stackexchange.com/questions/40679/why-the-value-of-v-is-always-either-27-11011-or-28-11100
+  const v: number = txParams.v
+  txParams.v = v < 27 ? v + 27 : v
+
+  return txParams
+}
 
 /**
  * Creates a new block object from Ethereum JSON RPC.
@@ -11,56 +29,20 @@ import blockHeaderFromRpc from './header-from-rpc'
  * @param uncles - Optional list of Ethereum JSON RPC of uncles (eth_getUncleByBlockHashAndIndex)
  * @param chainOptions - An object describing the blockchain
  */
-export default function blockFromRpc(
-  blockParams: any,
-  uncles?: any[],
-  chainOptions?: ChainOptions,
-) {
-  uncles = uncles || []
+export default function blockFromRpc(blockParams: any, uncles: any[] = [], options?: BlockOptions) {
+  const header = blockHeaderFromRpc(blockParams, options)
 
-  const header = blockHeaderFromRpc(blockParams, chainOptions)
-
-  const block = new Block(
-    {
-      header: header.toJSON(true),
-      transactions: [],
-      uncleHeaders: uncles.map(uh => blockHeaderFromRpc(uh, chainOptions).toJSON(true)),
-    },
-    chainOptions,
-  )
-
+  const transactions: Transaction[] = []
   if (blockParams.transactions) {
+    const opts = { common: header._common }
     for (const _txParams of blockParams.transactions) {
       const txParams = normalizeTxParams(_txParams)
-      // override from address
-      const fromAddress = ethUtil.toBuffer(txParams.from)
-      delete txParams.from
-      const tx = new FakeTransaction(txParams, chainOptions)
-      tx.from = fromAddress
-      tx.getSenderAddress = function() {
-        return fromAddress
-      }
-      // override hash
-      const txHash = ethUtil.toBuffer(txParams.hash)
-      tx.hash = function() {
-        return txHash
-      }
-
-      block.transactions.push(tx)
+      const tx = Transaction.fromTxData(txParams as TxData, opts)
+      transactions.push(tx)
     }
   }
 
-  return block
-}
+  const uncleHeaders = uncles.map((uh) => blockHeaderFromRpc(uh, options))
 
-function normalizeTxParams(_txParams: any) {
-  const txParams = Object.assign({}, _txParams)
-  // hot fix for https://github.com/ethereumjs/ethereumjs-util/issues/40
-  txParams.gasLimit = txParams.gasLimit === undefined ? txParams.gas : txParams.gasLimit
-  txParams.data = txParams.data === undefined ? txParams.input : txParams.data
-  // strict byte length checking
-  txParams.to = txParams.to ? ethUtil.setLengthLeft(ethUtil.toBuffer(txParams.to), 20) : null
-  // v as raw signature value {0,1}
-  txParams.v = txParams.v < 27 ? txParams.v + 27 : txParams.v
-  return txParams
+  return Block.fromBlockData({ header, transactions, uncleHeaders }, options)
 }

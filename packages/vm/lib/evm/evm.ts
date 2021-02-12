@@ -1,22 +1,26 @@
-import BN = require('bn.js')
+import { debug as createDebugLogger } from 'debug'
 import {
+  Account,
+  Address,
+  BN,
   generateAddress,
   generateAddress2,
   KECCAK256_NULL,
   MAX_INTEGER,
-  toBuffer,
-  zeros,
 } from 'ethereumjs-util'
-import Account from 'ethereumjs-account'
+import { Block } from '@ethereumjs/block'
 import { ERROR, VmError } from '../exceptions'
-import PStateManager from '../state/promisified'
-import { getPrecompile, PrecompileFunc, ripemdPrecompileAddress } from './precompiles'
+import { StateManager } from '../state/index'
+import { getPrecompile, PrecompileFunc } from './precompiles'
 import TxContext from './txContext'
 import Message from './message'
 import EEI from './eei'
+import { short } from './opcodes/util'
+import { Log } from './types'
 import { default as Interpreter, InterpreterOpts, RunState } from './interpreter'
 
-const Block = require('ethereumjs-block')
+const debug = createDebugLogger('vm:evm')
+const debugGas = createDebugLogger('vm:evm:gas')
 
 /**
  * Result of executing a message via the [[EVM]].
@@ -29,7 +33,7 @@ export interface EVMResult {
   /**
    * Address of created account durint transaction, if any
    */
-  createdAddress?: Buffer
+  createdAddress?: Address
   /**
    * Contains the results from running the code, if any, as described in [[runCode]]
    */
@@ -60,7 +64,7 @@ export interface ExecResult {
   /**
    * Array of logs that the contract emitted
    */
-  logs?: any[]
+  logs?: Log[]
   /**
    * A map from the accounts that have self-destructed to the addresses to send their funds to
    */
@@ -72,7 +76,7 @@ export interface ExecResult {
 }
 
 export interface NewContractEvent {
-  address: Buffer
+  address: Address
   // The deployment code
   code: Buffer
 }
@@ -84,6 +88,22 @@ export function OOGResult(gasLimit: BN): ExecResult {
     exceptionError: new VmError(ERROR.OUT_OF_GAS),
   }
 }
+// CodeDeposit OOG Result
+export function COOGResult(gasUsedCreateCode: BN): ExecResult {
+  return {
+    returnValue: Buffer.alloc(0),
+    gasUsed: gasUsedCreateCode,
+    exceptionError: new VmError(ERROR.CODESTORE_OUT_OF_GAS),
+  }
+}
+
+export function VmErrorResult(error: VmError, gasUsed: BN): ExecResult {
+  return {
+    returnValue: Buffer.alloc(0),
+    gasUsed: gasUsed,
+    exceptionError: error,
+  }
+}
 
 /**
  * EVM is responsible for executing an EVM message fully
@@ -93,17 +113,17 @@ export function OOGResult(gasLimit: BN): ExecResult {
  */
 export default class EVM {
   _vm: any
-  _state: PStateManager
+  _state: StateManager
   _tx: TxContext
-  _block: any
+  _block: Block
   /**
    * Amount of gas to refund from deleting storage values
    */
   _refund: BN
 
-  constructor(vm: any, txContext: TxContext, block: any) {
+  constructor(vm: any, txContext: TxContext, block: Block) {
     this._vm = vm
-    this._state = this._vm.pStateManager
+    this._state = this._vm.stateManager
     this._tx = txContext
     this._block = block
     this._refund = new BN(0)
@@ -118,23 +138,50 @@ export default class EVM {
     await this._vm._emit('beforeMessage', message)
 
     await this._state.checkpoint()
+    debug('-'.repeat(100))
+    debug(`message checkpoint`)
 
     let result
+    debug(
+      `New message caller=${message.caller.toString()} gasLimit=${message.gasLimit.toString()} to=${
+        message.to ? message.to.toString() : ''
+      } value=${message.value.toString()} delegatecall=${message.delegatecall ? 'yes' : 'no'}`
+    )
     if (message.to) {
+      debug(`Message CALL execution (to: ${message.to.toString()})`)
       result = await this._executeCall(message)
     } else {
+      debug(`Message CREATE execution (to undefined)`)
       result = await this._executeCreate(message)
     }
+    debug(
+      `Received message results gasUsed=${result.gasUsed} execResult: [ gasUsed=${
+        result.gasUsed
+      } exceptionError=${
+        result.execResult.exceptionError ? result.execResult.exceptionError.toString() : ''
+      } returnValue=${short(
+        result.execResult.returnValue
+      )} gasRefund=${result.execResult.gasRefund?.toString()} ]`
+    )
     // TODO: Move `gasRefund` to a tx-level result object
     // instead of `ExecResult`.
     result.execResult.gasRefund = this._refund.clone()
 
     const err = result.execResult.exceptionError
     if (err) {
-      result.execResult.logs = []
-      await this._state.revert()
+      if (this._vm._common.gteHardfork('homestead') || err.error != ERROR.CODESTORE_OUT_OF_GAS) {
+        result.execResult.logs = []
+        await this._state.revert()
+        debug(`message checkpoint reverted`)
+      } else {
+        // we are in chainstart and the error was the code deposit error
+        // we do like nothing happened.
+        await this._state.commit()
+        debug(`message checkpoint committed`)
+      }
     } else {
       await this._state.commit()
+      debug(`message checkpoint committed`)
     }
 
     await this._vm._emit('afterMessage', result)
@@ -151,17 +198,32 @@ export default class EVM {
     // Load `to` account
     const toAccount = await this._state.getAccount(message.to)
     // Add tx value to the `to` account
+    let errorMessage
     if (!message.delegatecall) {
-      await this._addToBalance(toAccount, message)
+      try {
+        await this._addToBalance(toAccount, message)
+      } catch (e) {
+        errorMessage = e
+      }
     }
 
     // Load code
     await this._loadCode(message)
+    let exit = false
     if (!message.code || message.code.length === 0) {
+      exit = true
+      debug(`Exit early on no code`)
+    }
+    if (errorMessage) {
+      exit = true
+      debug(`Exit early on value tranfer overflowed`)
+    }
+    if (exit) {
       return {
         gasUsed: new BN(0),
         execResult: {
           gasUsed: new BN(0),
+          exceptionError: errorMessage, // Only defined if addToBalance failed
           returnValue: Buffer.alloc(0),
         },
       }
@@ -169,12 +231,14 @@ export default class EVM {
 
     let result: ExecResult
     if (message.isCompiled) {
+      debug(`Run precompile`)
       result = await this.runPrecompile(
         message.code as PrecompileFunc,
         message.data,
-        message.gasLimit,
+        message.gasLimit
       )
     } else {
+      debug(`Start bytecode processing...`)
       result = await this.runInterpreter(message)
     }
 
@@ -192,12 +256,11 @@ export default class EVM {
     message.code = message.data
     message.data = Buffer.alloc(0)
     message.to = await this._generateAddress(message)
+    debug(`Generated CREATE contract address ${message.to.toString()}`)
     let toAccount = await this._state.getAccount(message.to)
     // Check for collision
-    if (
-      (toAccount.nonce && new BN(toAccount.nonce).gtn(0)) ||
-      toAccount.codeHash.compare(KECCAK256_NULL) !== 0
-    ) {
+    if ((toAccount.nonce && toAccount.nonce.gtn(0)) || !toAccount.codeHash.equals(KECCAK256_NULL)) {
+      debug(`Returning on address collision`)
       return {
         gasUsed: message.gasLimit,
         createdAddress: message.to,
@@ -219,46 +282,103 @@ export default class EVM {
     await this._vm._emit('newContract', newContractEvent)
 
     toAccount = await this._state.getAccount(message.to)
-    toAccount.nonce = new BN(toAccount.nonce).addn(1).toArrayLike(Buffer)
+    // EIP-161 on account creation and CREATE execution
+    if (this._vm._common.gteHardfork('spuriousDragon')) {
+      toAccount.nonce.iaddn(1)
+    }
 
     // Add tx value to the `to` account
-    await this._addToBalance(toAccount, message)
+    let errorMessage
+    try {
+      await this._addToBalance(toAccount, message)
+    } catch (e) {
+      errorMessage = e
+    }
 
+    let exit = false
     if (!message.code || message.code.length === 0) {
+      exit = true
+      debug(`Exit early on no code`)
+    }
+    if (errorMessage) {
+      exit = true
+      debug(`Exit early on value tranfer overflowed`)
+    }
+    if (exit) {
       return {
         gasUsed: new BN(0),
         createdAddress: message.to,
         execResult: {
           gasUsed: new BN(0),
+          exceptionError: errorMessage, // only defined if addToBalance failed
           returnValue: Buffer.alloc(0),
         },
       }
     }
 
+    debug(`Start bytecode processing...`)
     let result = await this.runInterpreter(message)
 
     // fee for size of the return value
     let totalGas = result.gasUsed
+    let returnFee = new BN(0)
     if (!result.exceptionError) {
-      const returnFee = new BN(
-        result.returnValue.length * this._vm._common.param('gasPrices', 'createData'),
+      returnFee = new BN(result.returnValue.length).imuln(
+        this._vm._common.param('gasPrices', 'createData')
       )
       totalGas = totalGas.add(returnFee)
+      debugGas(
+        `Add return value size fee (${returnFee.toString()} to gas used (-> ${totalGas.toString()}))`
+      )
     }
 
-    // if not enough gas
+    // Check for SpuriousDragon EIP-170 code size limit
+    let allowedCodeSize = true
+    if (
+      this._vm._common.gteHardfork('spuriousDragon') &&
+      result.returnValue.length > this._vm._common.param('vm', 'maxCodeSize')
+    ) {
+      allowedCodeSize = false
+    }
+    // If enough gas and allowed code size
+    let CodestoreOOG = false
     if (
       totalGas.lte(message.gasLimit) &&
-      (this._vm.allowUnlimitedContractSize || result.returnValue.length <= 24576)
+      (this._vm._allowUnlimitedContractSize || allowedCodeSize)
     ) {
       result.gasUsed = totalGas
     } else {
-      result = { ...result, ...OOGResult(message.gasLimit) }
+      if (this._vm._common.gteHardfork('homestead')) {
+        debug(`Not enough gas or code size not allowed (>= Homestead)`)
+        result = { ...result, ...OOGResult(message.gasLimit) }
+      } else {
+        // we are in Frontier
+        debug(`Not enough gas or code size not allowed (Frontier)`)
+        if (totalGas.sub(returnFee).lte(message.gasLimit)) {
+          // we cannot pay the code deposit fee (but the deposit code actually did run)
+          result = { ...result, ...COOGResult(totalGas.sub(returnFee)) }
+          CodestoreOOG = true
+        } else {
+          result = { ...result, ...OOGResult(message.gasLimit) }
+        }
+      }
     }
 
     // Save code if a new contract was created
     if (!result.exceptionError && result.returnValue && result.returnValue.toString() !== '') {
       await this._state.putContractCode(message.to, result.returnValue)
+      debug(`Code saved on new contract creation`)
+    } else if (CodestoreOOG) {
+      // This only happens at Frontier. But, let's do a sanity check;
+      if (!this._vm._common.gteHardfork('homestead')) {
+        // Pre-Homestead behavior; put an empty contract.
+        // This contract would be considered "DEAD" in later hard forks.
+        // It is thus an unecessary default item, which we have to save to dik
+        // It does change the state root, but it only wastes storage.
+        //await this._state.putContractCode(message.to, result.returnValue)
+        const account = await this._state.getAccount(message.to)
+        await this._state.putAccount(message.to, account)
+      }
     }
 
     return {
@@ -275,17 +395,17 @@ export default class EVM {
   async runInterpreter(message: Message, opts: InterpreterOpts = {}): Promise<ExecResult> {
     const env = {
       blockchain: this._vm.blockchain, // Only used in BLOCKHASH
-      address: message.to || zeros(32),
-      caller: message.caller || zeros(32),
+      address: message.to || Address.zero(),
+      caller: message.caller || Address.zero(),
       callData: message.data || Buffer.from([0]),
       callValue: message.value || new BN(0),
       code: message.code as Buffer,
       isStatic: message.isStatic || false,
       depth: message.depth || 0,
       gasPrice: this._tx.gasPrice,
-      origin: this._tx.origin || message.caller || zeros(32),
+      origin: this._tx.origin || message.caller || Address.zero(),
       block: this._block || new Block(),
-      contract: await this._state.getAccount(message.to || zeros(32)),
+      contract: await this._state.getAccount(message.to || Address.zero()),
       codeAddress: message.codeAddress,
     }
     const eei = new EEI(env, this._state, this, this._vm._common, message.gasLimit.clone())
@@ -332,14 +452,18 @@ export default class EVM {
    * Returns code for precompile at the given address, or undefined
    * if no such precompile exists.
    */
-  getPrecompile(address: Buffer): PrecompileFunc {
-    return getPrecompile(address.toString('hex'))
+  getPrecompile(address: Address): PrecompileFunc {
+    return getPrecompile(address, this._vm._common)
   }
 
   /**
    * Executes a precompiled contract with given data and gas limit.
    */
-  async runPrecompile(code: PrecompileFunc, data: Buffer, gasLimit: BN): Promise<ExecResult> {
+  runPrecompile(
+    code: PrecompileFunc,
+    data: Buffer,
+    gasLimit: BN
+  ): Promise<ExecResult> | ExecResult {
     if (typeof code !== 'function') {
       throw new Error('Invalid precompile')
     }
@@ -349,6 +473,7 @@ export default class EVM {
       gasLimit,
       _common: this._vm._common,
       _state: this._state,
+      _VM: this._vm,
     }
 
     return code(opts)
@@ -367,36 +492,41 @@ export default class EVM {
     }
   }
 
-  async _generateAddress(message: Message): Promise<Buffer> {
+  async _generateAddress(message: Message): Promise<Address> {
     let addr
     if (message.salt) {
-      addr = generateAddress2(message.caller, message.salt, message.code as Buffer)
+      addr = generateAddress2(message.caller.buf, message.salt, message.code as Buffer)
     } else {
       const acc = await this._state.getAccount(message.caller)
-      const newNonce = new BN(acc.nonce).subn(1)
-      addr = generateAddress(message.caller, newNonce.toArrayLike(Buffer))
+      const newNonce = acc.nonce.subn(1)
+      addr = generateAddress(message.caller.buf, newNonce.toArrayLike(Buffer))
     }
-    return addr
+    return new Address(addr)
   }
 
   async _reduceSenderBalance(account: Account, message: Message): Promise<void> {
-    const newBalance = new BN(account.balance).sub(message.value)
-    account.balance = toBuffer(newBalance)
-    return this._state.putAccount(toBuffer(message.caller), account)
+    account.balance.isub(message.value)
+    const result = this._state.putAccount(message.caller, account)
+    debug(
+      `Reduced sender (${message.caller.toString()}) balance (-> ${account.balance.toString()})`
+    )
+    return result
   }
 
   async _addToBalance(toAccount: Account, message: Message): Promise<void> {
-    const newBalance = new BN(toAccount.balance).add(message.value)
+    const newBalance = toAccount.balance.add(message.value)
     if (newBalance.gt(MAX_INTEGER)) {
-      throw new Error('Value overflow')
+      throw new VmError(ERROR.VALUE_OVERFLOW)
     }
-    toAccount.balance = toBuffer(newBalance)
+    toAccount.balance = newBalance
     // putAccount as the nonce may have changed for contract creation
-    return this._state.putAccount(toBuffer(message.to), toAccount)
+    const result = this._state.putAccount(message.to, toAccount)
+    debug(`Added toAccount (${message.to.toString()}) balance (-> ${toAccount.balance.toString()})`)
+    return result
   }
 
-  async _touchAccount(address: Buffer): Promise<void> {
-    const acc = await this._state.getAccount(address)
-    return this._state.putAccount(address, acc)
+  async _touchAccount(address: Address): Promise<void> {
+    const account = await this._state.getAccount(address)
+    return this._state.putAccount(address, account)
   }
 }

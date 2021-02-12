@@ -1,117 +1,113 @@
-[ethereumjs-tx](../README.md) › ["index"](../modules/_index_.md) › [TxData](_index_.txdata.md)
+[@ethereumjs/tx](../README.md) › ["index"](../modules/_index_.md) › [TxData](_index_.txdata.md)
 
 # Interface: TxData
 
-A transaction's data.
+An object with an optional field with each of the transaction's values.
 
 ## Hierarchy
 
-- **TxData**
-
-  ↳ [FakeTxData](_index_.faketxdata.md)
-
-  ↳ [FakeTxData](_types_.faketxdata.md)
+* **TxData**
 
 ## Index
 
 ### Properties
 
-- [data](_index_.txdata.md#optional-data)
-- [gasLimit](_index_.txdata.md#optional-gaslimit)
-- [gasPrice](_index_.txdata.md#optional-gasprice)
-- [nonce](_index_.txdata.md#optional-nonce)
-- [r](_index_.txdata.md#optional-r)
-- [s](_index_.txdata.md#optional-s)
-- [to](_index_.txdata.md#optional-to)
-- [v](_index_.txdata.md#optional-v)
-- [value](_index_.txdata.md#optional-value)
+* [data](_index_.txdata.md#optional-data)
+* [gasLimit](_index_.txdata.md#optional-gaslimit)
+* [gasPrice](_index_.txdata.md#optional-gasprice)
+* [nonce](_index_.txdata.md#optional-nonce)
+* [r](_index_.txdata.md#optional-r)
+* [s](_index_.txdata.md#optional-s)
+* [to](_index_.txdata.md#optional-to)
+* [v](_index_.txdata.md#optional-v)
+* [value](_index_.txdata.md#optional-value)
 
 ## Properties
 
 ### `Optional` data
 
-• **data**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **data**? : *BufferLike*
 
-_Defined in [types.ts:48](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L48)_
+*Defined in [types.ts:61](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L61)*
 
-This will contain the data of the message or the init of a contract
+This will contain the data of the message or the init of a contract.
 
----
+___
 
 ### `Optional` gasLimit
 
-• **gasLimit**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **gasLimit**? : *BNLike*
 
-_Defined in [types.ts:28](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L28)_
+*Defined in [types.ts:46](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L46)*
 
 The transaction's gas limit.
 
----
+___
 
 ### `Optional` gasPrice
 
-• **gasPrice**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **gasPrice**? : *BNLike*
 
-_Defined in [types.ts:33](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L33)_
+*Defined in [types.ts:41](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L41)*
 
 The transaction's gas price.
 
----
+___
 
 ### `Optional` nonce
 
-• **nonce**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **nonce**? : *BNLike*
 
-_Defined in [types.ts:43](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L43)_
+*Defined in [types.ts:36](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L36)*
 
 The transaction's nonce.
 
----
+___
 
 ### `Optional` r
 
-• **r**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **r**? : *BNLike*
 
-_Defined in [types.ts:58](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L58)_
+*Defined in [types.ts:71](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L71)*
 
 EC signature parameter.
 
----
+___
 
 ### `Optional` s
 
-• **s**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **s**? : *BNLike*
 
-_Defined in [types.ts:63](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L63)_
+*Defined in [types.ts:76](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L76)*
 
 EC signature parameter.
 
----
+___
 
 ### `Optional` to
 
-• **to**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **to**? : *AddressLike*
 
-_Defined in [types.ts:38](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L38)_
+*Defined in [types.ts:51](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L51)*
 
 The transaction's the address is sent to.
 
----
+___
 
 ### `Optional` v
 
-• **v**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **v**? : *BNLike*
 
-_Defined in [types.ts:53](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L53)_
+*Defined in [types.ts:66](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L66)*
 
 EC recovery ID.
 
----
+___
 
 ### `Optional` value
 
-• **value**? : _[BufferLike](../modules/\_index_.md#bufferlike)\_
+• **value**? : *BNLike*
 
-_Defined in [types.ts:68](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L68)_
+*Defined in [types.ts:56](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/tx/src/types.ts#L56)*
 
 The amount of Ether sent.

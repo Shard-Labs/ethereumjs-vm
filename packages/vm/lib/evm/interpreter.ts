@@ -1,14 +1,13 @@
-import BN = require('bn.js')
-import Common from 'ethereumjs-common'
-import { StateManager } from '../state'
-import PStateManager from '../state/promisified'
+import { debug as createDebugLogger } from 'debug'
+import { Account, Address, BN } from 'ethereumjs-util'
+import Common from '@ethereumjs/common'
+import { StateManager } from '../state/index'
 import { ERROR, VmError } from '../exceptions'
 import Memory from './memory'
 import Stack from './stack'
 import EEI from './eei'
-import { Opcode } from './opcodes'
-import { handlers as opHandlers, OpHandler } from './opFns'
-import Account from 'ethereumjs-account'
+import { precompiles } from './precompiles'
+import { Opcode, handlers as opHandlers, OpHandler, AsyncOpHandler } from './opcodes'
 
 export interface InterpreterOpts {
   pc?: number
@@ -21,11 +20,15 @@ export interface RunState {
   memoryWordCount: BN
   highestMemCost: BN
   stack: Stack
+  returnStack: Stack
   code: Buffer
   validJumps: number[]
+  validJumpSubs: number[]
   _common: Common
   stateManager: StateManager
   eei: EEI
+  accessedAddresses: Set<string>
+  accessedStorage: Map<string, Set<string>>
 }
 
 export interface InterpreterResult {
@@ -37,14 +40,24 @@ export interface InterpreterStep {
   gasLeft: BN
   stateManager: StateManager
   stack: BN[]
+  returnStack: BN[]
   pc: number
   depth: number
-  address: Buffer
-  memory: number[]
+  address: Address
+  memory: Buffer
   memoryWordCount: BN
-  opcode: Opcode
+  opcode: {
+    name: string
+    fee: number
+    isAsync: boolean
+  }
   account: Account
-  codeAddress: Buffer
+  codeAddress: Address
+}
+
+interface JumpDests {
+  jumps: number[]
+  jumpSubs: number[]
 }
 
 /**
@@ -52,13 +65,16 @@ export interface InterpreterStep {
  */
 export default class Interpreter {
   _vm: any
-  _state: PStateManager
+  _state: StateManager
   _runState: RunState
   _eei: EEI
 
+  // Opcode debuggers (e.g. { 'push': [debug Object], 'sstore': [debug Object], ...})
+  private opDebuggers: any = {}
+
   constructor(vm: any, eei: EEI) {
     this._vm = vm // TODO: remove when not needed
-    this._state = vm.pStateManager
+    this._state = vm.stateManager
     this._eei = eei
     this._runState = {
       programCounter: 0,
@@ -67,19 +83,28 @@ export default class Interpreter {
       memoryWordCount: new BN(0),
       highestMemCost: new BN(0),
       stack: new Stack(),
+      returnStack: new Stack(1023), // 1023 return stack height limit per EIP 2315 spec
       code: Buffer.alloc(0),
       validJumps: [],
+      validJumpSubs: [],
       // TODO: Replace with EEI methods
       _common: this._vm._common,
-      stateManager: this._state._wrapped,
+      stateManager: this._state,
       eei: this._eei,
+      accessedAddresses: new Set(),
+      accessedStorage: new Map(),
     }
   }
 
   async run(code: Buffer, opts: InterpreterOpts = {}): Promise<InterpreterResult> {
     this._runState.code = code
     this._runState.programCounter = opts.pc || this._runState.programCounter
-    this._runState.validJumps = this._getValidJumpDests(code)
+
+    const valid = this._getValidJumpDests(code)
+    this._runState.validJumps = valid.jumps
+    this._runState.validJumpSubs = valid.jumpSubs
+    this._initAccessedAddresses()
+    this._runState.accessedStorage.clear()
 
     // Check that the programCounter is in range
     const pc = this._runState.programCounter
@@ -131,7 +156,7 @@ export default class Interpreter {
     // Execute opcode handler
     const opFn = this.getOpHandler(opInfo)
     if (opInfo.isAsync) {
-      await opFn.apply(null, [this._runState])
+      await (<AsyncOpHandler>opFn).apply(null, [this._runState])
     } else {
       opFn.apply(null, [this._runState])
     }
@@ -141,46 +166,29 @@ export default class Interpreter {
    * Get the handler function for an opcode.
    */
   getOpHandler(opInfo: Opcode): OpHandler {
-    return opHandlers[opInfo.name]
+    return opHandlers.get(opInfo.code)!
   }
 
   /**
    * Get info for an opcode from VM's list of opcodes.
    */
-  lookupOpInfo(op: number, full: boolean = false): Opcode {
-    const opcode = this._vm._opcodes[op]
-      ? this._vm._opcodes[op]
-      : { name: 'INVALID', fee: 0, isAsync: false }
-
-    if (full) {
-      let name = opcode.name
-      if (name === 'LOG') {
-        name += op - 0xa0
-      }
-
-      if (name === 'PUSH') {
-        name += op - 0x5f
-      }
-
-      if (name === 'DUP') {
-        name += op - 0x7f
-      }
-
-      if (name === 'SWAP') {
-        name += op - 0x8f
-      }
-      return { ...opcode, ...{ name } }
-    }
-
-    return opcode
+  lookupOpInfo(op: number): Opcode {
+    // if not found, return 0xfe: INVALID
+    return this._vm._opcodes.get(op) || this._vm._opcodes.get(0xfe)
   }
 
   async _runStepHook(): Promise<void> {
+    const opcode = this.lookupOpInfo(this._runState.opCode)
     const eventObj: InterpreterStep = {
       pc: this._runState.programCounter,
       gasLeft: this._eei.getGasLeft(),
-      opcode: this.lookupOpInfo(this._runState.opCode, true),
+      opcode: {
+        name: opcode.fullName,
+        fee: opcode.fee,
+        isAsync: opcode.isAsync,
+      },
       stack: this._runState.stack._store,
+      returnStack: this._runState.returnStack._store,
       depth: this._eei._env.depth,
       address: this._eei._env.address,
       account: this._eei._env.contract,
@@ -189,6 +197,29 @@ export default class Interpreter {
       memoryWordCount: this._runState.memoryWordCount,
       codeAddress: this._eei._env.codeAddress,
     }
+
+    // Create opTrace for debug functionality
+    let hexStack = []
+    hexStack = eventObj.stack.map((item: any) => {
+      return '0x' + new BN(item).toString(16, 0)
+    })
+
+    const name = eventObj.opcode.name
+    const nameLC = name.toLowerCase()
+    const opTrace = {
+      pc: eventObj.pc,
+      op: name,
+      gas: '0x' + eventObj.gasLeft.toString('hex'),
+      gasCost: '0x' + eventObj.opcode.fee.toString(16),
+      stack: hexStack,
+      depth: eventObj.depth,
+    }
+
+    if (!(nameLC in this.opDebuggers)) {
+      this.opDebuggers[nameLC] = createDebugLogger(`vm:ops:${nameLC}`)
+    }
+    this.opDebuggers[nameLC](JSON.stringify(opTrace))
+
     /**
      * The `step` event for trace output
      *
@@ -198,19 +229,21 @@ export default class Interpreter {
      * @property {String} opcode the next opcode to be ran
      * @property {BN} gasLeft amount of gasLeft
      * @property {Array} stack an `Array` of `Buffers` containing the stack
-     * @property {Account} account the [`Account`](https://github.com/ethereum/ethereumjs-account) which owns the code running
-     * @property {Buffer} address the address of the `account`
+     * @property {Account} account the Account which owns the code running
+     * @property {Address} address the address of the `account`
      * @property {Number} depth the current number of calls deep the contract is
      * @property {Buffer} memory the memory of the VM as a `buffer`
      * @property {BN} memoryWordCount current size of memory in words
-     * @property {StateManager} stateManager a [`StateManager`](stateManager.md) instance (Beta API)
+     * @property {StateManager} stateManager a [[StateManager]] instance
+     * @property {Address} codeAddress the address of the code which is currently being ran (this differs from `address` in a `DELEGATECALL` and `CALLCODE` call)
      */
     return this._vm._emit('step', eventObj)
   }
 
-  // Returns all valid jump destinations.
-  _getValidJumpDests(code: Buffer): number[] {
+  // Returns all valid jump and jumpsub destinations.
+  _getValidJumpDests(code: Buffer): JumpDests {
     const jumps = []
+    const jumpSubs = []
 
     for (let i = 0; i < code.length; i++) {
       const curOpCode = this.lookupOpInfo(code[i]).name
@@ -223,8 +256,25 @@ export default class Interpreter {
       if (curOpCode === 'JUMPDEST') {
         jumps.push(i)
       }
+
+      if (curOpCode === 'BEGINSUB') {
+        jumpSubs.push(i)
+      }
     }
 
-    return jumps
+    return { jumps, jumpSubs }
+  }
+
+  // Populates accessedAddresses with 'pre-warmed' addresses. Includes
+  // tx.origin, `this` (e.g the address of the code being executed), and
+  // all the precompiles. (EIP 2929)
+  _initAccessedAddresses() {
+    this._runState.accessedAddresses.clear()
+    this._runState.accessedAddresses.add(this._eei._env.origin.toString())
+    this._runState.accessedAddresses.add(this._eei.getAddress().toString())
+
+    for (const address of Object.keys(precompiles)) {
+      this._runState.accessedAddresses.add(`0x${address}`)
+    }
   }
 }

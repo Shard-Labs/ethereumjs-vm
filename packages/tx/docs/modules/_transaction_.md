@@ -1,4 +1,4 @@
-[ethereumjs-tx](../README.md) › ["transaction"](_transaction_.md)
+[@ethereumjs/tx](../README.md) › ["transaction"](_transaction_.md)
 
 # Module: "transaction"
 
@@ -6,4 +6,4 @@
 
 ### Classes
 
-- [Transaction](../classes/_transaction_.transaction.md)
+* [Transaction](../classes/_transaction_.transaction.md)

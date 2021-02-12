@@ -1,14 +1,15 @@
 {
   "name": "homestead",
   "comment": "Homestead hardfork with protocol and network changes",
-  "eip": {
-    "url": "https://eips.ethereum.org/EIPS/eip-606",
-    "status": "Final"
-  },
+  "url": "https://eips.ethereum.org/EIPS/eip-606",
+  "status": "Final",
   "gasConfig": {},
-  "gasPrices": {},
+  "gasPrices": {
+    "delegatecall": {
+      "v": 40,
+      "d": "Base fee of the DELEGATECALL opcode"
+    }
+  },
   "vm": {},
-  "pow": {},
-  "casper": {},
-  "sharding": {}
+  "pow": {}
 }

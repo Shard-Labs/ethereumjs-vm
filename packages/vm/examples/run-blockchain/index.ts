@@ -1,105 +1,89 @@
+import { Account, Address, toBuffer, setLengthLeft } from 'ethereumjs-util'
+import { Block } from '@ethereumjs/block'
+import Blockchain from '@ethereumjs/blockchain'
+import Common from '@ethereumjs/common'
 import VM from '../../'
 
-import Account from 'ethereumjs-account'
-import Blockchain from 'ethereumjs-blockchain'
-import * as utils from 'ethereumjs-util'
-import { promisify } from 'util'
-import PStateManager from '../../lib/state/promisified'
-
-const Block = require('ethereumjs-block')
-const BlockHeader = require('ethereumjs-block/header.js')
 const testData = require('./test-data')
 const level = require('level')
 
 async function main() {
-  const hardfork = testData.network.toLowerCase()
+  const common = new Common({ chain: testData.network.toLowerCase() })
+  const validatePow = common.consensusType() === 'pow'
+  const validateBlocks = true
 
-  const blockchain = new Blockchain({
-    hardfork,
-    // This flag can be control whether the blocks are validated. This includes:
-    //    * Verifying PoW
-    //    * Validating each blocks's difficulty, uncles, tries, header and uncles.
-    validate: true,
+  const blockchain = await Blockchain.create({
+    common,
+    validateConsensus: validatePow,
+    validateBlocks,
+    genesisBlock: getGenesisBlock(common)
   })
 
-  // When verifying PoW, setting this cache improves the performance of subsequent runs of this
-  // script. It has no effect if the blockchain is initialized with `validate: false`.
-  setEthashCache(blockchain)
+  // When verifying PoW, setting this cache improves the
+  // performance of subsequent runs of this script.
+  // Note that this optimization is a bit hacky and might
+  // not be working in the future though. :-)
+  if (validatePow) {
+    blockchain._ethash!.cacheDB = level('./.cachedb')
+  }
 
-  const vm = new VM({
-    blockchain: blockchain,
-    hardfork,
-  })
+  const vm = new VM({ blockchain, common })
 
   await setupPreConditions(vm, testData)
 
-  await setGenesisBlock(blockchain, hardfork)
-
-  await putBlocks(blockchain, hardfork, testData)
+  await putBlocks(blockchain, common, testData)
 
   await vm.runBlockchain(blockchain)
 
-  const blockchainHead = await promisify<any>(vm.blockchain.getHead.bind(vm.blockchain))()
+  const blockchainHead = await vm.blockchain.getHead()
 
   console.log('--- Finished processing the BlockChain ---')
   console.log('New head:', '0x' + blockchainHead.hash().toString('hex'))
   console.log('Expected:', testData.lastblockhash)
 }
 
-function setEthashCache(blockchain: any) {
-  if (blockchain.validate) {
-    blockchain.ethash.cacheDB = level('./.cachedb')
-  }
-}
-
 async function setupPreConditions(vm: VM, testData: any) {
-  const psm = new PStateManager(vm.stateManager)
+  await vm.stateManager.checkpoint()
 
-  await psm.checkpoint()
+  for (const addr of Object.keys(testData.pre)) {
+    const { nonce, balance, storage, code } = testData.pre[addr]
 
-  for (const address of Object.keys(testData.pre)) {
-    const addressBuf = utils.toBuffer(address)
+    const address = new Address(Buffer.from(addr.slice(2), 'hex'))
+    const account = Account.fromAccountData({ nonce, balance })
+    await vm.stateManager.putAccount(address, account)
 
-    const acctData = testData.pre[address]
-    const account = new Account({
-      nonce: acctData.nonce,
-      balance: acctData.balance,
-    })
+    for (const hexStorageKey of Object.keys(storage)) {
+      const val = Buffer.from(storage[hexStorageKey], 'hex')
+      const storageKey = setLengthLeft(Buffer.from(hexStorageKey, 'hex'), 32)
 
-    await psm.putAccount(addressBuf, account)
-
-    for (const hexStorageKey of Object.keys(acctData.storage)) {
-      const val = utils.toBuffer(acctData.storage[hexStorageKey])
-      const storageKey = utils.setLength(utils.toBuffer(hexStorageKey), 32)
-
-      await psm.putContractStorage(addressBuf, storageKey, val)
+      await vm.stateManager.putContractStorage(address, storageKey, val)
     }
 
-    const codeBuf = utils.toBuffer(acctData.code)
+    const codeBuf = Buffer.from(code.slice(2), 'hex')
 
-    await psm.putContractCode(addressBuf, codeBuf)
+    await vm.stateManager.putContractCode(address, codeBuf)
   }
 
-  await psm.commit()
+  await vm.stateManager.commit()
 }
 
-async function setGenesisBlock(blockchain: any, hardfork: string) {
-  const genesisBlock = new Block({ hardfork })
-  genesisBlock.header = new BlockHeader(testData.genesisBlockHeader, { hardfork })
-
-  await promisify(blockchain.putGenesis.bind(blockchain))(genesisBlock)
+function getGenesisBlock(common: Common) {
+  const header = testData.genesisBlockHeader
+  const genesis = Block.genesis({ header }, { common })
+  return genesis
 }
 
-async function putBlocks(blockchain: any, hardfork: string, testData: any) {
+async function putBlocks(blockchain: any, common: Common, testData: any) {
   for (const blockData of testData.blocks) {
-    const block = new Block(utils.toBuffer(blockData.rlp), { hardfork })
-    await promisify(blockchain.putBlock.bind(blockchain))(block)
+    const blockRlp = toBuffer(blockData.rlp)
+    const block = Block.fromRLPSerializedBlock(blockRlp, { common })
+    await blockchain.putBlock(block)
   }
 }
 
 main()
   .then(() => process.exit(0))
-  .catch(err => {
+  .catch((err) => {
     console.error(err)
     process.exit(1)
   })

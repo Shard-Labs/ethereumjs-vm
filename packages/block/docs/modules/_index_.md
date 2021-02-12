@@ -1,4 +1,4 @@
-[ethereumjs-block](../README.md) › ["index"](_index_.md)
+[@ethereumjs/block](../README.md) › ["index"](_index_.md)
 
 # Module: "index"
 
@@ -6,38 +6,62 @@
 
 ### Classes
 
-- [Block](../classes/_index_.block.md)
-- [BlockHeader](../classes/_index_.blockheader.md)
+* [Block](../classes/_index_.block.md)
+* [BlockHeader](../classes/_index_.blockheader.md)
 
 ### Interfaces
 
-- [BlockData](../interfaces/_index_.blockdata.md)
-- [BlockHeaderData](../interfaces/_index_.blockheaderdata.md)
-- [Blockchain](../interfaces/_index_.blockchain.md)
-- [ChainOptions](../interfaces/_index_.chainoptions.md)
-- [TransformableToBuffer](../interfaces/_index_.transformabletobuffer.md)
+* [BlockData](../interfaces/_index_.blockdata.md)
+* [BlockOptions](../interfaces/_index_.blockoptions.md)
+* [Blockchain](../interfaces/_index_.blockchain.md)
+* [HeaderData](../interfaces/_index_.headerdata.md)
+* [JsonBlock](../interfaces/_index_.jsonblock.md)
+* [JsonHeader](../interfaces/_index_.jsonheader.md)
 
 ### Type aliases
 
-- [BufferLike](_index_.md#bufferlike)
-- [PrefixedHexString](_index_.md#prefixedhexstring)
+* [BlockBodyBuffer](_index_.md#blockbodybuffer)
+* [BlockBuffer](_index_.md#blockbuffer)
+* [BlockHeaderBuffer](_index_.md#blockheaderbuffer)
+* [TransactionsBuffer](_index_.md#transactionsbuffer)
+* [UncleHeadersBuffer](_index_.md#uncleheadersbuffer)
 
 ## Type aliases
 
-### BufferLike
+###  BlockBodyBuffer
 
-Ƭ **BufferLike**: _Buffer | [TransformableToBuffer](../interfaces/\_index_.transformabletobuffer.md) | [PrefixedHexString](_index_.md#prefixedhexstring) | number\_
+Ƭ **BlockBodyBuffer**: *[[TransactionsBuffer](_index_.md#transactionsbuffer), [UncleHeadersBuffer](_index_.md#uncleheadersbuffer)]*
 
-_Defined in [types.ts:42](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L42)_
+*Defined in [types.ts:94](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L94)*
 
-A Buffer, hex string prefixed with `0x`, Number, or an object with a toBuffer method such as BN.
+___
 
----
+###  BlockBuffer
 
-### PrefixedHexString
+Ƭ **BlockBuffer**: *[[BlockHeaderBuffer](_index_.md#blockheaderbuffer), [TransactionsBuffer](_index_.md#transactionsbuffer), [UncleHeadersBuffer](_index_.md#uncleheadersbuffer)]*
 
-Ƭ **PrefixedHexString**: _string_
+*Defined in [types.ts:92](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L92)*
 
-_Defined in [types.ts:37](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L37)_
+___
 
-A hex string prefixed with `0x`.
+###  BlockHeaderBuffer
+
+Ƭ **BlockHeaderBuffer**: *Buffer[]*
+
+*Defined in [types.ts:93](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L93)*
+
+___
+
+###  TransactionsBuffer
+
+Ƭ **TransactionsBuffer**: *Buffer[][]*
+
+*Defined in [types.ts:95](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L95)*
+
+___
+
+###  UncleHeadersBuffer
+
+Ƭ **UncleHeadersBuffer**: *Buffer[][]*
+
+*Defined in [types.ts:96](https://github.com/ethereumjs/ethereumjs-vm/blob/master/packages/block/src/types.ts#L96)*
